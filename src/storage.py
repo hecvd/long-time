@@ -66,6 +66,31 @@ class Storage:
     def get_tracker(self, tracker_id):
         return next((item for item in self.list_trackers() if item["id"] == tracker_id), None)
 
+    def export(self):
+        return {"version": 1, "exported_at": self._now(), "trackers": self.list_trackers()}
+
+    def import_data(self, trackers, mode):
+        now = self._now()
+        counts = {"trackers": 0, "entries": 0}
+        with self._connect() as db:
+            if mode == "replace":
+                db.execute("DELETE FROM trackers")
+            for tracker in trackers:
+                cursor = db.execute(
+                    "INSERT INTO trackers(title, description, started_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+                    (tracker["title"], tracker["description"], tracker["started_at"], now, now),
+                )
+                tracker_id = cursor.lastrowid
+                counts["trackers"] += 1
+                for entry in tracker["entries"]:
+                    values = tuple(entry[key] for key in ENTRY_FIELDS)
+                    db.execute(
+                        "INSERT INTO entries(tracker_id,kind,title,body,occurred_at,target_mode,target_at,target_value,target_unit,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                        (tracker_id, *values, now, now),
+                    )
+                    counts["entries"] += 1
+        return counts
+
     def create_tracker(self, data):
         now = self._now()
         with self._connect() as db:

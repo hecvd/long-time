@@ -106,6 +106,45 @@ def validate_entry(payload) -> dict:
     return result
 
 
+def _prefixed(prefix: str, error: ValidationError) -> dict[str, str]:
+    return {f"{prefix}.{key}": message for key, message in error.fields.items()}
+
+
+def validate_import(payload) -> tuple[str, list[dict]]:
+    if not isinstance(payload, dict):
+        raise ValidationError({"import": "Provide an import object."})
+    mode = payload.get("mode")
+    if mode not in {"append", "replace"}:
+        raise ValidationError({"mode": "Choose append or replace."})
+    raw_trackers = payload.get("trackers")
+    if not isinstance(raw_trackers, list):
+        raise ValidationError({"trackers": "Provide a list of trackers."})
+    trackers = []
+    for index, raw in enumerate(raw_trackers):
+        prefix = f"trackers[{index}]"
+        if not isinstance(raw, dict):
+            raise ValidationError({prefix: "Each tracker must be an object."})
+        try:
+            tracker = validate_tracker(raw)
+        except ValidationError as error:
+            raise ValidationError(_prefixed(prefix, error)) from error
+        raw_entries = raw.get("entries", [])
+        if not isinstance(raw_entries, list):
+            raise ValidationError({f"{prefix}.entries": "Entries must be a list."})
+        entries = []
+        for entry_index, raw_entry in enumerate(raw_entries):
+            entry_prefix = f"{prefix}.entries[{entry_index}]"
+            if not isinstance(raw_entry, dict):
+                raise ValidationError({entry_prefix: "Each entry must be an object."})
+            try:
+                entries.append(validate_entry(raw_entry))
+            except ValidationError as error:
+                raise ValidationError(_prefixed(entry_prefix, error)) from error
+        tracker["entries"] = entries
+        trackers.append(tracker)
+    return mode, trackers
+
+
 def add_calendar_months(value: datetime, months: int) -> datetime:
     month_index = value.year * 12 + value.month - 1 + months
     year, zero_based_month = divmod(month_index, 12)

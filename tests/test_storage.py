@@ -70,6 +70,31 @@ class StorageTestCase(unittest.TestCase):
         self.assertEqual(created["target_unit"], "months")
         self.assertEqual([entry["title"] for entry in self.storage.list_trackers()[0]["entries"]], ["Kept", "Month"])
 
+    def test_export_and_import_round_trip(self):
+        tracker = self.storage.create_tracker({"title": "Piano", "description": "d", "started_at": "2024-01-01T00:00:00Z"})
+        assert tracker is not None
+        self.storage.create_entry(tracker["id"], {
+            "kind": "note", "title": "Started", "body": "", "occurred_at": "2024-02-01T00:00:00Z",
+            "target_mode": None, "target_at": None, "target_value": None, "target_unit": None,
+        })
+        snapshot = self.storage.export()
+        self.assertEqual(snapshot["version"], 1)
+        payload = [
+            {**tracker_data, "entries": tracker_data["entries"]}
+            for tracker_data in snapshot["trackers"]
+        ]
+
+        appended = self.storage.import_data(payload, "append")
+        self.assertEqual(appended, {"trackers": 1, "entries": 1})
+        self.assertEqual(len(self.storage.list_trackers()), 2)
+
+        replaced = self.storage.import_data(payload, "replace")
+        self.assertEqual(replaced, {"trackers": 1, "entries": 1})
+        trackers = self.storage.list_trackers()
+        self.assertEqual(len(trackers), 1)
+        self.assertEqual(trackers[0]["title"], "Piano")
+        self.assertEqual(trackers[0]["entries"][0]["title"], "Started")
+
     def test_four_week_unit_is_accepted(self):
         tracker = self.storage.create_tracker({"title": "T", "description": "", "started_at": "2024-01-01T00:00:00Z"})
         assert tracker is not None

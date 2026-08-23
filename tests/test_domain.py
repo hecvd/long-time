@@ -1,6 +1,12 @@
 import unittest
 
-from domain import ValidationError, resolve_milestone_target, validate_entry, validate_tracker
+from domain import (
+    ValidationError,
+    resolve_milestone_target,
+    validate_entry,
+    validate_import,
+    validate_tracker,
+)
 
 
 class DomainTestCase(unittest.TestCase):
@@ -60,6 +66,39 @@ class DomainTestCase(unittest.TestCase):
             "target_mode": "duration", "target_value": 1.5, "target_unit": "four_weeks",
         })
         self.assertEqual(accepted["target_value"], 1.5)
+
+    def test_validate_import_normalizes_trackers_and_entries(self):
+        mode, trackers = validate_import({
+            "mode": "replace",
+            "trackers": [{
+                "title": " Piano ", "description": "", "started_at": "2024-01-01T00:00:00Z",
+                "entries": [{
+                    "kind": "note", "title": "Started", "body": "",
+                    "occurred_at": "2024-02-01T00:00:00Z",
+                }],
+            }],
+        })
+        self.assertEqual(mode, "replace")
+        self.assertEqual(trackers[0]["title"], "Piano")
+        self.assertEqual(trackers[0]["entries"][0]["kind"], "note")
+
+    def test_validate_import_requires_valid_mode_and_list(self):
+        with self.assertRaises(ValidationError) as raised:
+            validate_import({"mode": "merge", "trackers": []})
+        self.assertIn("mode", raised.exception.fields)
+        with self.assertRaises(ValidationError):
+            validate_import({"mode": "append", "trackers": "nope"})
+
+    def test_validate_import_namespaces_nested_errors(self):
+        with self.assertRaises(ValidationError) as raised:
+            validate_import({
+                "mode": "append",
+                "trackers": [{
+                    "title": "OK", "description": "", "started_at": "2024-01-01T00:00:00Z",
+                    "entries": [{"kind": "note", "title": "", "occurred_at": "2024-01-01T00:00:00Z"}],
+                }],
+            })
+        self.assertIn("trackers[0].entries[0].title", raised.exception.fields)
 
     def test_calendar_months_require_whole_numbers(self):
         valid = validate_entry({
