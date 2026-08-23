@@ -164,7 +164,7 @@ def create_server(host: str, port: int, db_path: Path, static_dir: Path):
 def main():
     parser = argparse.ArgumentParser(description="Serve Long Time")
     parser.add_argument("--host", default="127.0.0.1")
-    parser.add_argument("--port", type=int, default=8080)
+    parser.add_argument("--port", type=int, default=5225)
     parser.add_argument("--database", type=Path, default=Path("data/long-time.db"))
     args = parser.parse_args()
     root = Path(__file__).resolve().parent
