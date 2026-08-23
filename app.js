@@ -109,11 +109,6 @@ window.longTimeApp = function longTimeApp() {
 			);
 		},
 
-		get trackerCountLabel() {
-			const count = this.trackers.length;
-			return `${count} ${count === 1 ? "beginning" : "beginnings"} worth remembering.`;
-		},
-
 		get themeLabel() {
 			return {
 				system: "System theme",
@@ -444,6 +439,14 @@ window.longTimeApp = function longTimeApp() {
 
 		elapsed(tracker) {
 			return LongTimeLogic.elapsedParts(tracker.started_at, this.now);
+		},
+		calendarDuration(tracker) {
+			return LongTimeLogic.calendarDurationParts(tracker.started_at, this.now);
+		},
+		formattedClosestDuration(tracker) {
+			return LongTimeLogic.formatClosestDuration(
+				this.calendarDuration(tracker),
+			);
 		},
 		orderedEntries(tracker) {
 			return LongTimeLogic.orderedEntries(tracker);

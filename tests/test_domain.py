@@ -31,3 +31,28 @@ class DomainTestCase(unittest.TestCase):
     def test_duration_units_resolve(self):
         target = resolve_milestone_target("2024-01-01T00:00:00Z", {"target_mode": "duration", "target_value": 2, "target_unit": "weeks"})
         self.assertEqual(target, "2024-01-15T00:00:00Z")
+
+    def test_calendar_months_resolve_at_month_end_and_across_years(self):
+        leap_target = resolve_milestone_target(
+            "2024-01-31T10:15:00Z",
+            {"target_mode": "duration", "target_value": 1, "target_unit": "months"},
+        )
+        crossing_target = resolve_milestone_target(
+            "2024-11-30T10:15:00Z",
+            {"target_mode": "duration", "target_value": 3, "target_unit": "months"},
+        )
+        self.assertEqual(leap_target, "2024-02-29T10:15:00Z")
+        self.assertEqual(crossing_target, "2025-02-28T10:15:00Z")
+
+    def test_calendar_months_require_whole_numbers(self):
+        valid = validate_entry({
+            "kind": "milestone", "title": "One month", "body": "",
+            "target_mode": "duration", "target_value": 1, "target_unit": "months",
+        })
+        self.assertEqual(valid["target_unit"], "months")
+        with self.assertRaises(ValidationError) as raised:
+            validate_entry({
+                "kind": "milestone", "title": "Half month", "body": "",
+                "target_mode": "duration", "target_value": 0.5, "target_unit": "months",
+            })
+        self.assertIn("whole number", raised.exception.fields["target_value"])

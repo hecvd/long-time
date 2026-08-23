@@ -25,13 +25,7 @@
     </header>
 
     <main class="ledger" :aria-busy="loading">
-      <section class="intro" aria-labelledby="page-title">
-        <div>
-          <p class="eyebrow">A quiet living ledger</p>
-          <h1 id="page-title">Time, made visible.</h1>
-          <p class="count" x-text="trackerCountLabel"></p>
-        </div>
-        <div class="controls">
+      <section class="controls" aria-label="Tracker list controls">
           <label class="control-field">
             <span>Filter</span>
             <input
@@ -50,7 +44,6 @@
               <option value="name-desc">Name Z–A</option>
             </select>
           </label>
-        </div>
       </section>
 
       <p class="banner stale" role="status" x-show="stale" x-cloak>
@@ -115,9 +108,9 @@
                   ></span>
                 </span>
                 <span class="primary-time">
-                  <strong x-text="elapsed(tracker).years"></strong>
+                  <strong x-text="formattedClosestDuration(tracker)"></strong>
                   <span
-                    x-text="elapsed(tracker).future ? 'years until start' : 'years elapsed'"
+                    x-text="calendarDuration(tracker).future ? 'until start' : 'elapsed'"
                   ></span>
                 </span>
                 <span class="disclosure" aria-hidden="true">⌄</span>
@@ -411,7 +404,7 @@
                 type="number"
                 min="0.01"
                 max="1000000"
-                step="any"
+                :step="['months', 'years'].includes(entryForm.target_unit) ? 1 : 'any'"
                 required
                 x-model="entryForm.target_value" /><small
                 class="field-error"
@@ -424,6 +417,7 @@
                 <option value="hours">Hours</option>
                 <option value="days">Days</option>
                 <option value="weeks">Weeks</option>
+                <option value="months">Calendar months</option>
                 <option value="years">Calendar years</option></select
               ><small
                 class="field-error"
