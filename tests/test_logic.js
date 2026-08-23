@@ -208,6 +208,17 @@ test("tracker page uses adaptive time and omits the introductory copy", () => {
 	assert.doesNotMatch(html, /A quiet living ledger|Time, made visible|trackerCountLabel|class="intro"/);
 });
 
+test("tracker page exposes an inline quick-note form", () => {
+	const html = fs.readFileSync(path.join(__dirname, "..", "web", "index.html"), "utf8");
+	assert.match(html, /class="quick-note"/);
+	assert.match(html, /@submit\.prevent="addQuickNote\(tracker\)"/);
+	assert.match(html, /x-model="quickNotes\[tracker\.id\]"/);
+
+	const app = fs.readFileSync(path.join(__dirname, "..", "web", "app.js"), "utf8");
+	assert.match(app, /async addQuickNote\(tracker\)/);
+	assert.match(app, /occurred_at: new Date\(\)\.toISOString\(\)/);
+});
+
 test("shouldRefreshOnFocus waits five seconds", () => {
 	assert.equal(logic.shouldRefreshOnFocus(1_000, 5_999), false);
 	assert.equal(logic.shouldRefreshOnFocus(1_000, 6_000), true);

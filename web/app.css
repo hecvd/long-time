@@ -200,6 +200,18 @@ textarea {
 textarea {
 	resize: vertical;
 }
+.quick-note {
+	display: flex;
+	gap: 8px;
+	margin: 4px 0 12px;
+}
+.quick-note input {
+	flex: 1;
+	min-height: 38px;
+}
+.quick-note button {
+	flex: none;
+}
 .banner {
 	border: 1px solid var(--hairline);
 	border-radius: 8px;

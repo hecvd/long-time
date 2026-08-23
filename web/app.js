@@ -94,6 +94,9 @@ window.longTimeApp = function longTimeApp() {
 		entryErrors: {},
 		entryFormError: "",
 		savingEntry: false,
+		quickNotes: {},
+		quickNoteErrors: {},
+		savingQuickNoteId: null,
 		activeTrackerId: null,
 		confirmation: null,
 		deleting: false,
@@ -318,6 +321,31 @@ window.longTimeApp = function longTimeApp() {
 				name: tracker.title,
 			};
 			this.$refs.confirmDialog.showModal();
+		},
+
+		async addQuickNote(tracker) {
+			const title = (this.quickNotes[tracker.id] || "").trim();
+			this.quickNoteErrors[tracker.id] = "";
+			if (!title || this.savingQuickNoteId) return;
+			this.savingQuickNoteId = tracker.id;
+			try {
+				await api(`/api/trackers/${tracker.id}/entries`, {
+					method: "POST",
+					body: {
+						kind: "note",
+						title,
+						body: "",
+						occurred_at: new Date().toISOString(),
+					},
+				});
+				this.quickNotes[tracker.id] = "";
+				await this.loadTrackers({ preserve: true });
+				this.announce("Note added.");
+			} catch (error) {
+				this.quickNoteErrors[tracker.id] = error.message;
+			} finally {
+				this.savingQuickNoteId = null;
+			}
 		},
 
 		openNewNote(tracker) {
