@@ -52,3 +52,42 @@ class ServerTestCase(unittest.TestCase):
 
         status, _, _ = self.request("/missing.txt")
         self.assertEqual(status, 404)
+
+    def test_tracker_and_entry_api_workflow(self):
+        status, _, body = self.request("/api/trackers", "POST", {
+            "title": "Learning piano", "description": "",
+            "started_at": "2023-11-16T18:30:00+01:00",
+        })
+        self.assertEqual(status, 201)
+        tracker = json.loads(body)
+        status, _, body = self.request(f"/api/trackers/{tracker['id']}/entries", "POST", {
+            "kind": "milestone", "title": "Three years", "body": "Keep going",
+            "target_mode": "duration", "target_value": 3, "target_unit": "years",
+        })
+        self.assertEqual(status, 201)
+        milestone = json.loads(body)
+        status, headers, body = self.request("/api/trackers")
+        self.assertEqual(status, 200)
+        self.assertEqual(headers["Cache-Control"], "no-store")
+        self.assertEqual(json.loads(body)[0]["entries"][0]["id"], milestone["id"])
+
+        status, _, _ = self.request(f"/api/entries/{milestone['id']}", "DELETE")
+        self.assertEqual(status, 204)
+        status, _, _ = self.request(f"/api/trackers/{tracker['id']}", "DELETE")
+        self.assertEqual(status, 204)
+
+    def test_api_validation_missing_and_bad_json(self):
+        status, _, body = self.request("/api/trackers", "POST", {"title": "", "started_at": "bad"})
+        self.assertEqual(status, 400)
+        self.assertIn("field_errors", json.loads(body)["error"])
+        status, _, _ = self.request("/api/trackers/999", "DELETE")
+        self.assertEqual(status, 404)
+        status, _, body = self.request("/api/trackers", "POST", raw_body=b"{", headers={"Content-Type": "application/json"})
+        self.assertEqual(status, 400)
+        self.assertEqual(json.loads(body)["error"]["code"], "invalid_json")
+
+    def test_api_rejects_large_body_and_unsupported_method(self):
+        status, _, _ = self.request("/api/trackers", "POST", raw_body=b"x" * 65_537, headers={"Content-Type": "application/json"})
+        self.assertEqual(status, 413)
+        status, _, _ = self.request("/api/trackers", "PATCH", {})
+        self.assertEqual(status, 405)
