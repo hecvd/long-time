@@ -11,6 +11,7 @@
 	--moss-wash: #e3e9e1;
 	--danger: #9b3d35;
 	--focus: #54715a;
+	--cleared: #9a7b2e;
 	color-scheme: light;
 	font-family:
 		Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
@@ -30,6 +31,7 @@
 	--moss-wash: #29352b;
 	--danger: #e28b82;
 	--focus: #a6c0ab;
+	--cleared: #d3b264;
 	color-scheme: dark;
 }
 
@@ -47,6 +49,7 @@
 		--moss-wash: #29352b;
 		--danger: #e28b82;
 		--focus: #a6c0ab;
+		--cleared: #d3b264;
 		color-scheme: dark;
 	}
 }
@@ -402,6 +405,16 @@ textarea {
 }
 .rail li.future .rail-marker {
 	background: var(--ledger-sheet);
+}
+.rail li.cleared .rail-marker {
+	border-color: var(--cleared);
+	background: var(--cleared);
+}
+.rail li.cleared .entry-kicker {
+	color: var(--cleared);
+}
+.rail li.cleared .entry-card {
+	border-color: color-mix(in srgb, var(--cleared) 45%, var(--hairline));
 }
 .entry-card {
 	border: 1px solid var(--hairline);

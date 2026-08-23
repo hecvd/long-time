@@ -211,7 +211,12 @@
                   x-for="entry in orderedEntries(tracker)"
                   :key="entry.id"
                 >
-                  <li :class="{'future': entryIsFuture(tracker, entry)}">
+                  <li
+                    :class="{
+                      'future': entryIsFuture(tracker, entry),
+                      'cleared': entry.kind === 'milestone' && !entryIsFuture(tracker, entry),
+                    }"
+                  >
                     <span class="rail-marker" aria-hidden="true"></span>
                     <div class="entry-card">
                       <div class="entry-copy">
