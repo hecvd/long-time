@@ -208,6 +208,14 @@ test("tracker page uses adaptive time and omits the introductory copy", () => {
 	assert.doesNotMatch(html, /A quiet living ledger|Time, made visible|trackerCountLabel|class="intro"/);
 });
 
+test("rail marks cleared milestones distinctly", () => {
+	const html = fs.readFileSync(path.join(__dirname, "..", "web", "index.html"), "utf8");
+	assert.match(html, /'cleared': entry\.kind === 'milestone' && !entryIsFuture\(tracker, entry\)/);
+	const css = fs.readFileSync(path.join(__dirname, "..", "web", "app.css"), "utf8");
+	assert.match(css, /--cleared:/);
+	assert.match(css, /\.rail li\.cleared \.rail-marker/);
+});
+
 test("resolvedMilestoneTarget treats four_weeks as 28 days", () => {
 	const tracker = { started_at: "2024-01-01T00:00:00Z" };
 	const target = logic.resolvedMilestoneTarget(tracker, {
