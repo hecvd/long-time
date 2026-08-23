@@ -36,8 +36,9 @@ class StorageTestCase(unittest.TestCase):
 
     def test_initialize_migrates_month_units_without_losing_entries(self):
         self.storage.path.unlink()
-        with sqlite3.connect(self.storage.path) as db:
-            db.executescript("""
+        legacy = sqlite3.connect(self.storage.path)
+        try:
+            legacy.executescript("""
                 CREATE TABLE trackers (
                     id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT NOT NULL,
                     description TEXT NOT NULL, started_at TEXT NOT NULL,
@@ -55,6 +56,9 @@ class StorageTestCase(unittest.TestCase):
                 INSERT INTO trackers VALUES (1, 'Existing', '', '2024-01-31T10:15:00Z', 'now', 'now');
                 INSERT INTO entries VALUES (1, 1, 'note', 'Kept', '', '2024-02-01T00:00:00Z', NULL, NULL, NULL, NULL, 'now', 'now');
             """)
+            legacy.commit()
+        finally:
+            legacy.close()
 
         self.storage.initialize()
         created = self.storage.create_entry(1, {
