@@ -6,7 +6,7 @@ import re
 from datetime import datetime, timedelta, timezone
 
 TIMESTAMP_WITH_ZONE = re.compile(r"(?:Z|[+-]\d{2}:\d{2})$")
-UNITS = {"hours", "days", "weeks", "months", "years"}
+UNITS = {"hours", "days", "weeks", "four_weeks", "months", "years"}
 
 
 class ValidationError(ValueError):
@@ -94,7 +94,7 @@ def validate_entry(payload) -> dict:
             else:
                 result["target_value"] = value
             if unit not in UNITS:
-                fields["target_unit"] = "Choose hours, days, weeks, months, or years."
+                fields["target_unit"] = "Choose hours, days, weeks, four-week months, calendar months, or years."
             else:
                 result["target_unit"] = unit
             if payload.get("target_at") not in (None, ""):
@@ -130,6 +130,6 @@ def resolve_milestone_target(started_at: str, entry: dict) -> str:
         except (OverflowError, ValueError) as error:
             raise ValidationError({"target_value": "The target is outside the supported date range."}) from error
     else:
-        hours = value * {"hours": 1, "days": 24, "weeks": 168}[unit]
+        hours = value * {"hours": 1, "days": 24, "weeks": 168, "four_weeks": 672}[unit]
         target = start + timedelta(hours=hours)
     return utc_text(target)
