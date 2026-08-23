@@ -1,0 +1,60 @@
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const logic = require('../logic.js');
+
+test('elapsedParts reports future and elapsed units', () => {
+  assert.deepEqual(logic.elapsedParts('2024-01-01T00:00:00Z', new Date('2024-01-15T12:00:00Z')), {
+    future: false, hours: 348, days: 14, weeks: 2.1, years: 0.04,
+  });
+  assert.equal(logic.elapsedParts('2025-01-01T00:00:00Z', new Date('2024-01-01T00:00:00Z')).future, true);
+});
+
+test('filterTrackers searches tracker and entry text', () => {
+  const trackers = [{title: 'Piano', description: '', entries: [{title: 'Daily practice', body: ''}]}];
+  assert.equal(logic.filterTrackers(trackers, 'practice').length, 1);
+  assert.equal(logic.filterTrackers(trackers, 'running').length, 0);
+});
+
+test('sortTrackers returns a copy in requested order', () => {
+  const trackers = [
+    {title: 'Zulu', started_at: '2024-01-02T00:00:00Z', updated_at: '2024-01-03T00:00:00Z'},
+    {title: 'alpha', started_at: '2024-01-01T00:00:00Z', updated_at: '2024-01-04T00:00:00Z'},
+  ];
+  const sorted = logic.sortTrackers(trackers, 'name-asc');
+  assert.deepEqual(sorted.map((item) => item.title), ['alpha', 'Zulu']);
+  assert.notEqual(sorted, trackers);
+});
+
+test('milestone dates resolve calendar years and duration units', () => {
+  const tracker = {started_at: '2024-02-29T10:15:00Z'};
+  const annual = {target_mode: 'duration', target_value: 1, target_unit: 'years'};
+  assert.equal(logic.resolvedMilestoneTarget(tracker, annual).toISOString(), '2025-02-28T10:15:00.000Z');
+  assert.equal(logic.milestoneState(tracker, annual, new Date('2025-01-01T00:00:00Z')).future, true);
+});
+
+test('safePreference tolerates unavailable or invalid storage', () => {
+  const storage = {getItem: () => { throw new Error('blocked'); }};
+  assert.equal(logic.safePreference(storage, 'theme', 'system', ['system', 'dark']), 'system');
+  assert.equal(logic.safePreference({getItem: () => 'other'}, 'theme', 'system', ['system', 'dark']), 'system');
+});
+
+test('orderedEntries uses resolved timestamps newest first', () => {
+  const tracker = {started_at: '2024-01-01T00:00:00Z', entries: [
+    {id: 1, kind: 'note', occurred_at: '2024-01-02T00:00:00Z'},
+    {id: 2, kind: 'milestone', target_mode: 'duration', target_value: 2, target_unit: 'weeks'},
+  ]};
+  assert.deepEqual(logic.orderedEntries(tracker).map((item) => item.id), [2, 1]);
+});
+
+test('entryTimingLabel describes notes and milestones', () => {
+  const tracker = {started_at: '2024-01-01T00:00:00Z'};
+  assert.equal(logic.entryTimingLabel(tracker, {kind: 'note', occurred_at: '2024-01-02T00:00:00Z'}), '24 hours after start');
+  const milestone = {kind: 'milestone', target_mode: 'duration', target_value: 2, target_unit: 'weeks'};
+  assert.equal(logic.entryTimingLabel(tracker, milestone, new Date('2024-01-01T00:00:00Z')), '2 weeks remaining');
+  assert.equal(logic.entryTimingLabel(tracker, milestone, new Date('2024-01-28T00:00:00Z')), '13 days ago');
+});
+
+test('shouldRefreshOnFocus waits five seconds', () => {
+  assert.equal(logic.shouldRefreshOnFocus(1_000, 5_999), false);
+  assert.equal(logic.shouldRefreshOnFocus(1_000, 6_000), true);
+});
