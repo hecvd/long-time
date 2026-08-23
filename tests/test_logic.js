@@ -1,5 +1,7 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const path = require("node:path");
 const logic = require("../logic.js");
 
 test("elapsedParts reports future and elapsed units", () => {
@@ -74,6 +76,59 @@ test("milestone dates resolve calendar years and duration units", () => {
 	);
 });
 
+test("calendar month milestones clamp to the destination month end", () => {
+	const tracker = { started_at: "2024-01-31T10:15:00Z" };
+	const monthly = {
+		target_mode: "duration",
+		target_value: 1,
+		target_unit: "months",
+	};
+	assert.equal(
+		logic.resolvedMilestoneTarget(tracker, monthly).toISOString(),
+		"2024-02-29T10:15:00.000Z",
+	);
+});
+
+test("calendarDurationParts decomposes past and future durations", () => {
+	assert.deepEqual(
+		logic.calendarDurationParts(
+			"2022-10-31T10:15:00Z",
+			new Date("2025-02-03T15:45:00Z"),
+		),
+		{ future: false, years: 2, months: 3, days: 3, hours: 5 },
+	);
+	assert.deepEqual(
+		logic.calendarDurationParts(
+			"2025-02-03T15:45:00Z",
+			new Date("2022-10-31T10:15:00Z"),
+		),
+		{ future: true, years: 2, months: 3, days: 3, hours: 5 },
+	);
+});
+
+test("formatClosestDuration chooses the nearest useful unit", () => {
+	assert.equal(
+		logic.formatClosestDuration({ years: 2, months: 3, days: 2, hours: 1 }),
+		"2 years",
+	);
+	assert.equal(
+		logic.formatClosestDuration({ years: 0, months: 3, days: 2, hours: 1 }),
+		"3 months",
+	);
+	assert.equal(
+		logic.formatClosestDuration({ years: 0, months: 0, days: 18, hours: 1 }),
+		"2 weeks",
+	);
+	assert.equal(
+		logic.formatClosestDuration({ years: 0, months: 0, days: 2, hours: 1 }),
+		"2 days",
+	);
+	assert.equal(
+		logic.formatClosestDuration({ years: 0, months: 0, days: 0, hours: 1 }),
+		"1 hour",
+	);
+});
+
 test("safePreference tolerates unavailable or invalid storage", () => {
 	const storage = {
 		getItem: () => {
@@ -144,6 +199,13 @@ test("entryTimingLabel describes notes and milestones", () => {
 		),
 		"13 days ago",
 	);
+});
+
+test("tracker page uses adaptive time and omits the introductory copy", () => {
+	const html = fs.readFileSync(path.join(__dirname, "..", "index.html"), "utf8");
+	assert.match(html, /formattedClosestDuration\(tracker\)/);
+	assert.match(html, /value="months">Calendar months/);
+	assert.doesNotMatch(html, /A quiet living ledger|Time, made visible|trackerCountLabel|class="intro"/);
 });
 
 test("shouldRefreshOnFocus waits five seconds", () => {

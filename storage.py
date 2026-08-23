@@ -54,12 +54,37 @@ class Storage:
                     target_mode TEXT CHECK(target_mode IN ('date', 'duration') OR target_mode IS NULL),
                     target_at TEXT,
                     target_value REAL,
-                    target_unit TEXT CHECK(target_unit IN ('hours', 'days', 'weeks', 'years') OR target_unit IS NULL),
+                    target_unit TEXT CHECK(target_unit IN ('hours', 'days', 'weeks', 'months', 'years') OR target_unit IS NULL),
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL
                 );
                 CREATE INDEX IF NOT EXISTS entries_tracker_id_idx ON entries(tracker_id);
             """)
+            entries_sql = db.execute(
+                "SELECT sql FROM sqlite_master WHERE type='table' AND name='entries'"
+            ).fetchone()["sql"]
+            if "'months'" not in entries_sql:
+                db.executescript("""
+                    ALTER TABLE entries RENAME TO entries_without_months;
+                    CREATE TABLE entries (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        tracker_id INTEGER NOT NULL REFERENCES trackers(id) ON DELETE CASCADE,
+                        kind TEXT NOT NULL CHECK(kind IN ('note', 'milestone')),
+                        title TEXT NOT NULL CHECK(length(title) BETWEEN 1 AND 120),
+                        body TEXT NOT NULL DEFAULT '' CHECK(length(body) <= 2000),
+                        occurred_at TEXT,
+                        target_mode TEXT CHECK(target_mode IN ('date', 'duration') OR target_mode IS NULL),
+                        target_at TEXT,
+                        target_value REAL,
+                        target_unit TEXT CHECK(target_unit IN ('hours', 'days', 'weeks', 'months', 'years') OR target_unit IS NULL),
+                        created_at TEXT NOT NULL,
+                        updated_at TEXT NOT NULL
+                    );
+                    INSERT INTO entries
+                    SELECT * FROM entries_without_months;
+                    DROP TABLE entries_without_months;
+                    CREATE INDEX entries_tracker_id_idx ON entries(tracker_id);
+                """)
 
     def list_trackers(self):
         with self._connect() as db:

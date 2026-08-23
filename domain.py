@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+import calendar
 import math
 import re
 from datetime import datetime, timedelta, timezone
 
 TIMESTAMP_WITH_ZONE = re.compile(r"(?:Z|[+-]\d{2}:\d{2})$")
-UNITS = {"hours", "days", "weeks", "years"}
+UNITS = {"hours", "days", "weeks", "months", "years"}
 
 
 class ValidationError(ValueError):
@@ -88,12 +89,12 @@ def validate_entry(payload) -> dict:
             valid_number = isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
             if not valid_number or not 0 < value <= 1_000_000:
                 fields["target_value"] = "Enter a positive duration up to 1,000,000."
-            elif unit == "years" and value % 1 != 0:
-                fields["target_value"] = "Calendar years must be a whole number."
+            elif unit in {"months", "years"} and value % 1 != 0:
+                fields["target_value"] = "Calendar months and years must be whole numbers."
             else:
                 result["target_value"] = value
             if unit not in UNITS:
-                fields["target_unit"] = "Choose hours, days, weeks, or years."
+                fields["target_unit"] = "Choose hours, days, weeks, months, or years."
             else:
                 result["target_unit"] = unit
             if payload.get("target_at") not in (None, ""):
@@ -103,6 +104,14 @@ def validate_entry(payload) -> dict:
     if fields:
         raise ValidationError(fields)
     return result
+
+
+def add_calendar_months(value: datetime, months: int) -> datetime:
+    month_index = value.year * 12 + value.month - 1 + months
+    year, zero_based_month = divmod(month_index, 12)
+    month = zero_based_month + 1
+    day = min(value.day, calendar.monthrange(year, month)[1])
+    return value.replace(year=year, month=month, day=day)
 
 
 def resolve_milestone_target(started_at: str, entry: dict) -> str:
@@ -115,6 +124,11 @@ def resolve_milestone_target(started_at: str, entry: dict) -> str:
             target = start.replace(year=start.year + int(value))
         except ValueError:
             target = start.replace(year=start.year + int(value), day=28)
+    elif unit == "months":
+        try:
+            target = add_calendar_months(start, int(value))
+        except (OverflowError, ValueError) as error:
+            raise ValidationError({"target_value": "The target is outside the supported date range."}) from error
     else:
         hours = value * {"hours": 1, "days": 24, "weeks": 168}[unit]
         target = start + timedelta(hours=hours)

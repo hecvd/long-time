@@ -53,17 +53,69 @@
 		return result.sort(comparators[mode] || comparators.recent);
 	}
 
+	function addCalendarYears(value, years) {
+		const target = new Date(value);
+		const wantedMonth = target.getUTCMonth();
+		target.setUTCFullYear(target.getUTCFullYear() + years);
+		if (target.getUTCMonth() !== wantedMonth) target.setUTCDate(0);
+		return target;
+	}
+
+	function addCalendarMonths(value, months) {
+		const target = new Date(value);
+		const wantedDay = target.getUTCDate();
+		target.setUTCDate(1);
+		target.setUTCMonth(target.getUTCMonth() + months);
+		const destinationMonth = target.getUTCMonth();
+		target.setUTCDate(wantedDay);
+		if (target.getUTCMonth() !== destinationMonth) target.setUTCDate(0);
+		return target;
+	}
+
+	function calendarDurationParts(startedAt, now = new Date()) {
+		const started = new Date(startedAt);
+		const future = started > now;
+		const earlier = future ? now : started;
+		const later = future ? started : now;
+
+		let years = later.getUTCFullYear() - earlier.getUTCFullYear();
+		let cursor = addCalendarYears(earlier, years);
+		if (cursor > later) cursor = addCalendarYears(earlier, --years);
+
+		let months =
+			(later.getUTCFullYear() - cursor.getUTCFullYear()) * 12 +
+			later.getUTCMonth() -
+			cursor.getUTCMonth();
+		let monthCursor = addCalendarMonths(cursor, months);
+		if (monthCursor > later) monthCursor = addCalendarMonths(cursor, --months);
+
+		const remainingHours = Math.floor((later - monthCursor) / 3_600_000);
+		return {
+			future,
+			years,
+			months,
+			days: Math.floor(remainingHours / 24),
+			hours: remainingHours % 24,
+		};
+	}
+
+	function formatClosestDuration(parts) {
+		let value;
+		let unit;
+		if (parts.years) [value, unit] = [parts.years, "year"];
+		else if (parts.months) [value, unit] = [parts.months, "month"];
+		else if (parts.days >= 7) [value, unit] = [Math.floor(parts.days / 7), "week"];
+		else if (parts.days) [value, unit] = [parts.days, "day"];
+		else [value, unit] = [parts.hours, "hour"];
+		return `${value} ${unit}${value === 1 ? "" : "s"}`;
+	}
+
 	function resolvedMilestoneTarget(tracker, entry) {
 		if (entry.target_mode === "date") return new Date(entry.target_at);
 		const start = new Date(tracker.started_at);
 		const value = Number(entry.target_value);
-		if (entry.target_unit === "years") {
-			const target = new Date(start);
-			const wantedMonth = target.getUTCMonth();
-			target.setUTCFullYear(target.getUTCFullYear() + value);
-			if (target.getUTCMonth() !== wantedMonth) target.setUTCDate(0);
-			return target;
-		}
+		if (entry.target_unit === "years") return addCalendarYears(start, value);
+		if (entry.target_unit === "months") return addCalendarMonths(start, value);
 		const multipliers = { hours: 3_600_000, days: DAY_MS, weeks: 7 * DAY_MS };
 		return new Date(start.getTime() + value * multipliers[entry.target_unit]);
 	}
@@ -125,6 +177,8 @@
 
 	return {
 		elapsedParts,
+		calendarDurationParts,
+		formatClosestDuration,
 		filterTrackers,
 		sortTrackers,
 		resolvedMilestoneTarget,

@@ -151,13 +151,6 @@ textarea:focus-visible {
 	margin: 0 auto;
 	padding: 72px 0 96px;
 }
-.intro {
-	display: flex;
-	align-items: end;
-	justify-content: space-between;
-	gap: 32px;
-	margin-bottom: 36px;
-}
 .eyebrow {
 	margin: 0 0 5px;
 	color: var(--moss);
@@ -166,34 +159,24 @@ textarea:focus-visible {
 	letter-spacing: 0.12em;
 	text-transform: uppercase;
 }
-h1,
 h2,
 h3,
 h4,
 p {
 	margin-top: 0;
 }
-h1,
 h2,
 h3,
 h4 {
 	font-family: Georgia, "Times New Roman", serif;
 	line-height: 1.12;
 }
-h1 {
-	margin-bottom: 8px;
-	font-size: clamp(36px, 7vw, 56px);
-	letter-spacing: -0.035em;
-}
-.count {
-	margin: 0;
-	color: var(--graphite-soft);
-}
 .controls {
 	width: 300px;
 	display: grid;
 	grid-template-columns: 1.2fr 1fr;
 	gap: 8px;
+	margin: 0 0 36px auto;
 }
 .control-field,
 .dialog-form > label,
@@ -277,7 +260,7 @@ textarea {
 	border-radius: 0;
 	background: transparent;
 	display: grid;
-	grid-template-columns: 1fr auto 24px;
+	grid-template-columns: minmax(0, 1fr) auto 24px;
 	align-items: center;
 	gap: 24px;
 	padding: 20px 12px;
@@ -303,14 +286,14 @@ textarea {
 	color: var(--graphite-soft);
 }
 .primary-time {
-	min-width: 128px;
+	min-width: 150px;
 	text-align: right;
 	display: grid;
 }
 .primary-time strong {
 	color: var(--moss);
 	font-family: Georgia, serif;
-	font-size: 38px;
+	font-size: 34px;
 	line-height: 1;
 	font-variant-numeric: tabular-nums;
 }
@@ -552,11 +535,6 @@ time,
 	.ledger {
 		width: min(100% - 24px, 760px);
 		padding-top: 44px;
-	}
-	.intro {
-		align-items: stretch;
-		flex-direction: column;
-		gap: 20px;
 	}
 	.controls {
 		width: 100%;
