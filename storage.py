@@ -5,6 +5,9 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 
+MIGRATIONS_DIR = Path(__file__).resolve().parent / "migrations"
+ENTRY_FIELDS = ("kind", "title", "body", "occurred_at", "target_mode", "target_at", "target_value", "target_unit")
+
 
 class Storage:
     def __init__(self, path: Path):
@@ -35,56 +38,19 @@ class Storage:
     def initialize(self):
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with self._connect() as db:
-            db.executescript("""
-                CREATE TABLE IF NOT EXISTS trackers (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    title TEXT NOT NULL CHECK(length(title) BETWEEN 1 AND 120),
-                    description TEXT NOT NULL DEFAULT '' CHECK(length(description) <= 500),
-                    started_at TEXT NOT NULL,
-                    created_at TEXT NOT NULL,
-                    updated_at TEXT NOT NULL
-                );
-                CREATE TABLE IF NOT EXISTS entries (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    tracker_id INTEGER NOT NULL REFERENCES trackers(id) ON DELETE CASCADE,
-                    kind TEXT NOT NULL CHECK(kind IN ('note', 'milestone')),
-                    title TEXT NOT NULL CHECK(length(title) BETWEEN 1 AND 120),
-                    body TEXT NOT NULL DEFAULT '' CHECK(length(body) <= 2000),
-                    occurred_at TEXT,
-                    target_mode TEXT CHECK(target_mode IN ('date', 'duration') OR target_mode IS NULL),
-                    target_at TEXT,
-                    target_value REAL,
-                    target_unit TEXT CHECK(target_unit IN ('hours', 'days', 'weeks', 'months', 'years') OR target_unit IS NULL),
-                    created_at TEXT NOT NULL,
-                    updated_at TEXT NOT NULL
-                );
-                CREATE INDEX IF NOT EXISTS entries_tracker_id_idx ON entries(tracker_id);
-            """)
-            entries_sql = db.execute(
-                "SELECT sql FROM sqlite_master WHERE type='table' AND name='entries'"
-            ).fetchone()["sql"]
-            if "'months'" not in entries_sql:
-                db.executescript("""
-                    ALTER TABLE entries RENAME TO entries_without_months;
-                    CREATE TABLE entries (
-                        id INTEGER PRIMARY KEY AUTOINCREMENT,
-                        tracker_id INTEGER NOT NULL REFERENCES trackers(id) ON DELETE CASCADE,
-                        kind TEXT NOT NULL CHECK(kind IN ('note', 'milestone')),
-                        title TEXT NOT NULL CHECK(length(title) BETWEEN 1 AND 120),
-                        body TEXT NOT NULL DEFAULT '' CHECK(length(body) <= 2000),
-                        occurred_at TEXT,
-                        target_mode TEXT CHECK(target_mode IN ('date', 'duration') OR target_mode IS NULL),
-                        target_at TEXT,
-                        target_value REAL,
-                        target_unit TEXT CHECK(target_unit IN ('hours', 'days', 'weeks', 'months', 'years') OR target_unit IS NULL),
-                        created_at TEXT NOT NULL,
-                        updated_at TEXT NOT NULL
-                    );
-                    INSERT INTO entries
-                    SELECT * FROM entries_without_months;
-                    DROP TABLE entries_without_months;
-                    CREATE INDEX entries_tracker_id_idx ON entries(tracker_id);
-                """)
+            db.execute(
+                "CREATE TABLE IF NOT EXISTS schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL)"
+            )
+            applied = {row[0] for row in db.execute("SELECT version FROM schema_migrations")}
+            for path in sorted(MIGRATIONS_DIR.glob("*.sql")):
+                version = int(path.name.split("_", 1)[0])
+                if version in applied:
+                    continue
+                db.executescript(path.read_text(encoding="utf-8"))
+                db.execute(
+                    "INSERT INTO schema_migrations(version, applied_at) VALUES (?, ?)",
+                    (version, self._now()),
+                )
 
     def list_trackers(self):
         with self._connect() as db:
@@ -130,7 +96,7 @@ class Storage:
 
     def create_entry(self, tracker_id, data):
         now = self._now()
-        values = tuple(data[key] for key in ("kind", "title", "body", "occurred_at", "target_mode", "target_at", "target_value", "target_unit"))
+        values = tuple(data[key] for key in ENTRY_FIELDS)
         with self._connect() as db:
             if db.execute("SELECT 1 FROM trackers WHERE id=?", (tracker_id,)).fetchone() is None:
                 return None
@@ -147,7 +113,7 @@ class Storage:
         if existing is None:
             return None
         now = self._now()
-        values = tuple(data[key] for key in ("kind", "title", "body", "occurred_at", "target_mode", "target_at", "target_value", "target_unit"))
+        values = tuple(data[key] for key in ENTRY_FIELDS)
         with self._connect() as db:
             db.execute(
                 "UPDATE entries SET kind=?,title=?,body=?,occurred_at=?,target_mode=?,target_at=?,target_value=?,target_unit=?,updated_at=? WHERE id=?",
