@@ -3,12 +3,169 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="color-scheme" content="light dark">
   <title>Long Time</title>
   <link rel="stylesheet" href="app.css">
 </head>
-<body>
-  <main><h1>Long Time</h1></main>
+<body x-data="longTimeApp()" x-init="init()">
+  <header class="site-header">
+    <a class="wordmark" href="/" aria-label="Long Time home">Long Time</a>
+    <nav aria-label="Page actions">
+      <button class="quiet-button" type="button" @click="cycleTheme()" :title="themeLabel" x-text="themeLabel"></button>
+      <button class="primary-button" type="button" @click="openNewTracker()">New tracker</button>
+    </nav>
+  </header>
+
+  <main class="ledger" :aria-busy="loading">
+    <section class="intro" aria-labelledby="page-title">
+      <div>
+        <p class="eyebrow">A quiet living ledger</p>
+        <h1 id="page-title">Time, made visible.</h1>
+        <p class="count" x-text="trackerCountLabel"></p>
+      </div>
+      <div class="controls">
+        <label class="control-field">
+          <span>Filter</span>
+          <input type="search" x-model.debounce.200ms="filter" placeholder="Search the ledger">
+        </label>
+        <label class="control-field">
+          <span>Sort</span>
+          <select x-model="sortMode">
+            <option value="recent">Recently changed</option>
+            <option value="start-asc">Oldest start</option>
+            <option value="start-desc">Newest start</option>
+            <option value="name-asc">Name A–Z</option>
+            <option value="name-desc">Name Z–A</option>
+          </select>
+        </label>
+      </div>
+    </section>
+
+    <p class="banner stale" role="status" x-show="stale" x-cloak>Showing saved data. The server could not be reached.</p>
+    <div class="banner error" role="status" x-show="globalError" x-cloak>
+      <span x-text="globalError"></span>
+      <button type="button" @click="loadTrackers()">Try again</button>
+    </div>
+
+    <section class="state-panel" x-show="loading" x-cloak>
+      <span class="loading-line"></span><span class="loading-line short"></span>
+      <p>Opening the ledger…</p>
+    </section>
+    <section class="state-panel" x-show="!loading && !trackers.length && !globalError" x-cloak>
+      <p class="eyebrow">The first mark</p>
+      <h2>Nothing is being counted yet.</h2>
+      <p>Begin with something worth remembering.</p>
+      <button class="primary-button" type="button" @click="openNewTracker()">Create a tracker</button>
+    </section>
+    <section class="state-panel" x-show="!loading && trackers.length && !visibleTrackers.length" x-cloak>
+      <h2>No entries match.</h2>
+      <p>Try a different word or clear the filter.</p>
+      <button type="button" @click="filter = ''">Clear filter</button>
+    </section>
+
+    <section class="tracker-list" aria-label="Time trackers" x-show="!loading && visibleTrackers.length" x-cloak>
+      <template x-for="tracker in visibleTrackers" :key="tracker.id">
+        <article class="tracker" :class="{'expanded': expandedId === tracker.id}">
+          <div class="tracker-summary">
+            <button class="tracker-toggle" type="button" @click="toggleTracker(tracker.id)" :aria-expanded="expandedId === tracker.id" :aria-controls="`tracker-detail-${tracker.id}`">
+              <span class="tracker-copy">
+                <span class="tracker-title" x-text="tracker.title"></span>
+                <span class="tracker-description" x-text="tracker.description || 'No description'"></span>
+              </span>
+              <span class="primary-time">
+                <strong x-text="elapsed(tracker).years"></strong>
+                <span x-text="elapsed(tracker).future ? 'years until start' : 'years elapsed'"></span>
+              </span>
+              <span class="disclosure" aria-hidden="true">⌄</span>
+            </button>
+          </div>
+
+          <div class="tracker-detail" x-show="expandedId === tracker.id" :id="`tracker-detail-${tracker.id}`">
+            <div class="measurements" aria-label="Elapsed measurements">
+              <div><strong x-text="elapsed(tracker).hours"></strong><span>hours</span></div>
+              <div><strong x-text="elapsed(tracker).days"></strong><span>days</span></div>
+              <div><strong x-text="elapsed(tracker).weeks"></strong><span>weeks</span></div>
+              <div><strong x-text="elapsed(tracker).years"></strong><span>years</span></div>
+            </div>
+            <div class="tracker-meta">
+              <p>Started <time x-text="formatTimestamp(tracker.started_at)" :datetime="tracker.started_at"></time></p>
+              <div class="inline-actions">
+                <button type="button" @click="openEditTracker(tracker)">Edit tracker</button>
+                <button class="danger-link" type="button" @click="requestTrackerDelete(tracker)">Delete</button>
+              </div>
+            </div>
+            <div class="entry-heading">
+              <div><p class="eyebrow">Chronological rail</p><h3>Notes & milestones</h3></div>
+              <div class="inline-actions">
+                <button type="button" @click="openNewNote(tracker)">Add note</button>
+                <button class="primary-button small" type="button" @click="openNewMilestone(tracker)">Add milestone</button>
+              </div>
+            </div>
+            <p class="empty-rail" x-show="!tracker.entries.length">No marks on this timeline yet.</p>
+            <ol class="rail" x-show="tracker.entries.length">
+              <template x-for="entry in orderedEntries(tracker)" :key="entry.id">
+                <li :class="{'future': entryIsFuture(tracker, entry)}">
+                  <span class="rail-marker" aria-hidden="true"></span>
+                  <div class="entry-card">
+                    <div class="entry-copy">
+                      <p class="entry-kicker"><span x-text="entry.kind"></span> · <span x-text="entryTimingLabel(tracker, entry)"></span></p>
+                      <h4 x-text="entry.title"></h4>
+                      <p x-show="entry.body" x-text="entry.body"></p>
+                    </div>
+                    <div class="entry-actions">
+                      <button type="button" @click="openEditEntry(tracker, entry)" :aria-label="`Edit ${entry.title}`">Edit</button>
+                      <button class="danger-link" type="button" @click="requestEntryDelete(entry)" :aria-label="`Delete ${entry.title}`">Delete</button>
+                    </div>
+                  </div>
+                </li>
+              </template>
+            </ol>
+          </div>
+        </article>
+      </template>
+    </section>
+  </main>
+
+  <dialog x-ref="trackerDialog" aria-labelledby="tracker-dialog-title" @cancel.prevent="closeTrackerDialog()">
+    <form class="dialog-form" @submit.prevent="saveTracker()">
+      <div class="dialog-heading"><p class="eyebrow">Tracker</p><h2 id="tracker-dialog-title" x-text="trackerForm.id ? 'Edit this beginning' : 'Remember a beginning'"></h2></div>
+      <p class="form-error" role="status" x-show="trackerFormError" x-text="trackerFormError"></p>
+      <label><span>Title</span><input type="text" maxlength="120" required x-model="trackerForm.title" :aria-describedby="trackerErrors.title ? 'tracker-title-error' : null"><small id="tracker-title-error" class="field-error" x-show="trackerErrors.title" x-text="trackerErrors.title"></small></label>
+      <label><span>Description <em>optional</em></span><textarea maxlength="500" rows="3" x-model="trackerForm.description" :aria-describedby="trackerErrors.description ? 'tracker-description-error' : null"></textarea><small id="tracker-description-error" class="field-error" x-show="trackerErrors.description" x-text="trackerErrors.description"></small></label>
+      <label><span>Started at</span><input type="datetime-local" required x-model="trackerForm.started_at" :aria-describedby="trackerErrors.started_at ? 'tracker-start-error' : null"><small id="tracker-start-error" class="field-error" x-show="trackerErrors.started_at" x-text="trackerErrors.started_at"></small></label>
+      <div class="dialog-actions"><button type="button" @click="closeTrackerDialog()" :disabled="savingTracker">Cancel</button><button class="primary-button" type="submit" :disabled="savingTracker" x-text="savingTracker ? 'Saving…' : 'Save tracker'"></button></div>
+    </form>
+  </dialog>
+
+  <dialog x-ref="entryDialog" aria-labelledby="entry-dialog-title" @cancel.prevent="closeEntryDialog()">
+    <form class="dialog-form" @submit.prevent="saveEntry()">
+      <div class="dialog-heading"><p class="eyebrow" x-text="entryForm.kind"></p><h2 id="entry-dialog-title" x-text="entryForm.id ? 'Edit this mark' : (entryForm.kind === 'note' ? 'Add a note' : 'Add a milestone')"></h2></div>
+      <p class="form-error" role="status" x-show="entryFormError" x-text="entryFormError"></p>
+      <label><span>Title</span><input type="text" maxlength="120" required x-model="entryForm.title"><small class="field-error" x-show="entryErrors.title" x-text="entryErrors.title"></small></label>
+      <label><span>Details <em>optional</em></span><textarea maxlength="2000" rows="3" x-model="entryForm.body"></textarea><small class="field-error" x-show="entryErrors.body" x-text="entryErrors.body"></small></label>
+      <template x-if="entryForm.kind === 'note'"><label><span>When</span><input type="datetime-local" required x-model="entryForm.occurred_at"><small class="field-error" x-show="entryErrors.occurred_at" x-text="entryErrors.occurred_at"></small></label></template>
+      <template x-if="entryForm.kind === 'milestone'">
+        <fieldset><legend>Target type</legend><div class="segmented"><label><input type="radio" value="date" x-model="entryForm.target_mode"><span>Date</span></label><label><input type="radio" value="duration" x-model="entryForm.target_mode"><span>Elapsed duration</span></label></div></fieldset>
+      </template>
+      <template x-if="entryForm.kind === 'milestone' && entryForm.target_mode === 'date'"><label><span>Target date and time</span><input type="datetime-local" required x-model="entryForm.target_at"><small class="field-error" x-show="entryErrors.target_at" x-text="entryErrors.target_at"></small></label></template>
+      <template x-if="entryForm.kind === 'milestone' && entryForm.target_mode === 'duration'">
+        <div class="duration-fields"><label><span>Duration</span><input type="number" min="0.01" max="1000000" step="any" required x-model="entryForm.target_value"><small class="field-error" x-show="entryErrors.target_value" x-text="entryErrors.target_value"></small></label><label><span>Unit</span><select x-model="entryForm.target_unit"><option value="hours">Hours</option><option value="days">Days</option><option value="weeks">Weeks</option><option value="years">Calendar years</option></select><small class="field-error" x-show="entryErrors.target_unit" x-text="entryErrors.target_unit"></small></label></div>
+      </template>
+      <div class="dialog-actions"><button type="button" @click="closeEntryDialog()" :disabled="savingEntry">Cancel</button><button class="primary-button" type="submit" :disabled="savingEntry" x-text="savingEntry ? 'Saving…' : 'Save entry'"></button></div>
+    </form>
+  </dialog>
+
+  <dialog class="confirm-dialog" x-ref="confirmDialog" aria-labelledby="confirm-title" @cancel.prevent="closeConfirmation()">
+    <div class="dialog-form">
+      <p class="eyebrow">Permanent action</p><h2 id="confirm-title">Delete this item?</h2>
+      <p>“<span x-text="confirmation?.name"></span>” and any dependent records will be removed.</p>
+      <div class="dialog-actions"><button type="button" @click="closeConfirmation()" :disabled="deleting">Keep it</button><button class="danger-button" type="button" @click="confirmDelete()" :disabled="deleting" x-text="deleting ? 'Deleting…' : 'Delete permanently'"></button></div>
+    </div>
+  </dialog>
+
+  <p class="sr-only" aria-live="polite" aria-atomic="true" x-text="statusMessage"></p>
   <script src="logic.js"></script>
   <script src="app.js"></script>
+  <script defer src="vendor/alpine-3.14.9.min.js"></script>
 </body>
 </html>
