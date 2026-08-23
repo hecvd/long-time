@@ -2,7 +2,7 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
-const logic = require("../logic.js");
+const logic = require("../web/logic.js");
 
 test("elapsedParts reports future and elapsed units", () => {
 	assert.deepEqual(
@@ -202,7 +202,7 @@ test("entryTimingLabel describes notes and milestones", () => {
 });
 
 test("tracker page uses adaptive time and omits the introductory copy", () => {
-	const html = fs.readFileSync(path.join(__dirname, "..", "index.html"), "utf8");
+	const html = fs.readFileSync(path.join(__dirname, "..", "web", "index.html"), "utf8");
 	assert.match(html, /formattedClosestDuration\(tracker\)/);
 	assert.match(html, /value="months">Calendar months/);
 	assert.doesNotMatch(html, /A quiet living ledger|Time, made visible|trackerCountLabel|class="intro"/);

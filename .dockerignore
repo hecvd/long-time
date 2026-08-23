@@ -1,5 +1,7 @@
 .git
 .gitignore
+.github
+.superpowers
 tests
 docs
 uv.lock
