@@ -70,6 +70,17 @@ class StorageTestCase(unittest.TestCase):
         self.assertEqual(created["target_unit"], "months")
         self.assertEqual([entry["title"] for entry in self.storage.list_trackers()[0]["entries"]], ["Kept", "Month"])
 
+    def test_four_week_unit_is_accepted(self):
+        tracker = self.storage.create_tracker({"title": "T", "description": "", "started_at": "2024-01-01T00:00:00Z"})
+        assert tracker is not None
+        entry = self.storage.create_entry(tracker["id"], {
+            "kind": "milestone", "title": "Six weeks", "body": "", "occurred_at": None,
+            "target_mode": "duration", "target_at": None, "target_value": 1.5, "target_unit": "four_weeks",
+        })
+        assert entry is not None
+        self.assertEqual(entry["target_unit"], "four_weeks")
+        self.assertEqual(entry["target_value"], 1.5)
+
     def test_updates_and_missing_records(self):
         tracker = self.storage.create_tracker({"title": "A", "description": "", "started_at": "2024-01-01T00:00:00Z"})
         assert tracker is not None

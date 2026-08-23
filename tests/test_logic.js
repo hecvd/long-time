@@ -208,6 +208,22 @@ test("tracker page uses adaptive time and omits the introductory copy", () => {
 	assert.doesNotMatch(html, /A quiet living ledger|Time, made visible|trackerCountLabel|class="intro"/);
 });
 
+test("resolvedMilestoneTarget treats four_weeks as 28 days", () => {
+	const tracker = { started_at: "2024-01-01T00:00:00Z" };
+	const target = logic.resolvedMilestoneTarget(tracker, {
+		target_mode: "duration",
+		target_value: 1.5,
+		target_unit: "four_weeks",
+	});
+	assert.equal(target.toISOString(), "2024-02-12T00:00:00.000Z");
+});
+
+test("duration form offers a four-week month and allows whole calendar months", () => {
+	const html = fs.readFileSync(path.join(__dirname, "..", "web", "index.html"), "utf8");
+	assert.match(html, /<option value="four_weeks">Months \(4 weeks\)<\/option>/);
+	assert.match(html, /:min="\['months', 'years'\]\.includes\(entryForm\.target_unit\) \? 1 : 0\.01"/);
+});
+
 test("tracker page exposes an inline quick-note form", () => {
 	const html = fs.readFileSync(path.join(__dirname, "..", "web", "index.html"), "utf8");
 	assert.match(html, /class="quick-note"/);

@@ -44,6 +44,23 @@ class DomainTestCase(unittest.TestCase):
         self.assertEqual(leap_target, "2024-02-29T10:15:00Z")
         self.assertEqual(crossing_target, "2025-02-28T10:15:00Z")
 
+    def test_four_week_months_resolve_as_28_days_and_allow_fractions(self):
+        whole = resolve_milestone_target(
+            "2024-01-01T00:00:00Z",
+            {"target_mode": "duration", "target_value": 1, "target_unit": "four_weeks"},
+        )
+        fractional = resolve_milestone_target(
+            "2024-01-01T00:00:00Z",
+            {"target_mode": "duration", "target_value": 1.5, "target_unit": "four_weeks"},
+        )
+        self.assertEqual(whole, "2024-01-29T00:00:00Z")
+        self.assertEqual(fractional, "2024-02-12T00:00:00Z")
+        accepted = validate_entry({
+            "kind": "milestone", "title": "Six weeks", "body": "",
+            "target_mode": "duration", "target_value": 1.5, "target_unit": "four_weeks",
+        })
+        self.assertEqual(accepted["target_value"], 1.5)
+
     def test_calendar_months_require_whole_numbers(self):
         valid = validate_entry({
             "kind": "milestone", "title": "One month", "body": "",

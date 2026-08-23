@@ -116,7 +116,12 @@
 		const value = Number(entry.target_value);
 		if (entry.target_unit === "years") return addCalendarYears(start, value);
 		if (entry.target_unit === "months") return addCalendarMonths(start, value);
-		const multipliers = { hours: 3_600_000, days: DAY_MS, weeks: 7 * DAY_MS };
+		const multipliers = {
+			hours: 3_600_000,
+			days: DAY_MS,
+			weeks: 7 * DAY_MS,
+			four_weeks: 28 * DAY_MS,
+		};
 		return new Date(start.getTime() + value * multipliers[entry.target_unit]);
 	}
 
