@@ -179,6 +179,30 @@
                   </button>
                 </div>
               </div>
+              <form
+                class="quick-note"
+                @submit.prevent="addQuickNote(tracker)"
+              >
+                <input
+                  type="text"
+                  x-model="quickNotes[tracker.id]"
+                  maxlength="120"
+                  placeholder="Add a quick note…"
+                  aria-label="Add a quick note, stamped with the current time"
+                  :disabled="savingQuickNoteId === tracker.id"
+                />
+                <button
+                  class="primary-button small"
+                  type="submit"
+                  :disabled="savingQuickNoteId === tracker.id || !(quickNotes[tracker.id] || '').trim()"
+                  x-text="savingQuickNoteId === tracker.id ? 'Adding…' : 'Add'"
+                ></button>
+              </form>
+              <p
+                class="field-error"
+                x-show="quickNoteErrors[tracker.id]"
+                x-text="quickNoteErrors[tracker.id]"
+              ></p>
               <p class="empty-rail" x-show="!tracker.entries.length">
                 No marks on this timeline yet.
               </p>
