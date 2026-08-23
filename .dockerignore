@@ -1,0 +1,15 @@
+.git
+.gitignore
+tests
+docs
+uv.lock
+*.md
+!README.md
+data
+config
+.venv
+__pycache__
+**/__pycache__
+Dockerfile
+.dockerignore
+docker-compose.yml
