@@ -10,10 +10,11 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import unquote, urlsplit
 
-from domain import ValidationError, validate_entry, validate_tracker  # pyright: ignore[reportMissingImports]
+from domain import ValidationError, validate_entry, validate_import, validate_tracker  # pyright: ignore[reportMissingImports]
 from storage import Storage  # pyright: ignore[reportMissingImports]
 
 MAX_BODY = 65_536
+MAX_IMPORT_BODY = 8_388_608
 TRACKER_PATH = re.compile(r"^/api/trackers/(\d+)$")
 TRACKER_ENTRIES_PATH = re.compile(r"^/api/trackers/(\d+)/entries$")
 ENTRY_PATH = re.compile(r"^/api/entries/(\d+)$")
@@ -44,18 +45,30 @@ def create_handler(storage: Storage, static_dir: Path):
             self.end_headers()
             self.wfile.write(body)
 
+        def send_export(self):
+            data = storage.export()
+            body = json.dumps(data, separators=(",", ":")).encode("utf-8")
+            filename = f"long-time-{data['exported_at'][:10]}.json"
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Content-Disposition", f'attachment; filename="{filename}"')
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            self.wfile.write(body)
+
         def send_api_error(self, status, code, message, field_errors=None):
             error = {"code": code, "message": message}
             if field_errors:
                 error["field_errors"] = field_errors
             self.send_json(status, {"error": error})
 
-        def read_json(self):
+        def read_json(self, max_bytes=MAX_BODY):
             try:
                 length = int(self.headers.get("Content-Length", "0"))
             except ValueError as error:
                 raise ApiError(400, "invalid_request", "Invalid request body.") from error
-            if length > MAX_BODY:
+            if length > max_bytes:
                 raise ApiError(413, "request_too_large", "The request body is too large.")
             try:
                 payload = json.loads(self.rfile.read(length).decode("utf-8"))
@@ -69,6 +82,9 @@ def create_handler(storage: Storage, static_dir: Path):
             path = urlsplit(self.path).path
             if path == "/api/trackers":
                 self.send_json(200, storage.list_trackers())
+                return
+            if path == "/api/export":
+                self.send_export()
                 return
             if path.startswith("/api"):
                 self.send_api_error(404, "not_found", "That resource does not exist.")
@@ -92,6 +108,10 @@ def create_handler(storage: Storage, static_dir: Path):
             try:
                 if method == "POST" and path == "/api/trackers":
                     self.send_json(201, storage.create_tracker(validate_tracker(self.read_json())))
+                    return
+                if method == "POST" and path == "/api/import":
+                    mode, trackers = validate_import(self.read_json(MAX_IMPORT_BODY))
+                    self.send_json(200, storage.import_data(trackers, mode))
                     return
                 tracker_match = TRACKER_PATH.fullmatch(path)
                 if tracker_match and method in {"PUT", "DELETE"}:

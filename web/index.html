@@ -18,6 +18,12 @@
           :title="themeLabel"
           x-text="themeLabel"
         ></button>
+        <button class="quiet-button" type="button" @click="exportData()">
+          Export
+        </button>
+        <button class="quiet-button" type="button" @click="openImport()">
+          Import
+        </button>
         <button class="primary-button" type="button" @click="openNewTracker()">
           New tracker
         </button>
@@ -503,6 +509,61 @@
           ></button>
         </div>
       </div>
+    </dialog>
+
+    <dialog
+      class="confirm-dialog"
+      x-ref="importDialog"
+      aria-labelledby="import-title"
+      @cancel.prevent="closeImport()"
+    >
+      <form class="dialog-form" @submit.prevent="runImport()">
+        <div class="dialog-heading">
+          <p class="eyebrow">Backup</p>
+          <h2 id="import-title">Import a ledger</h2>
+        </div>
+        <p
+          class="form-error"
+          role="status"
+          x-show="importError"
+          x-text="importError"
+        ></p>
+        <label
+          ><span>Export file</span
+          ><input
+            type="file"
+            accept="application/json,.json"
+            x-ref="importFile"
+            required
+        /></label>
+        <fieldset>
+          <legend>Mode</legend>
+          <div class="segmented">
+            <label
+              ><input type="radio" value="append" x-model="importMode" /><span
+                >Append</span
+              ></label
+            ><label
+              ><input type="radio" value="replace" x-model="importMode" /><span
+                >Replace all</span
+              ></label
+            >
+          </div>
+        </fieldset>
+        <p class="field-error" x-show="importMode === 'replace'">
+          Replace deletes every current tracker before importing.
+        </p>
+        <div class="dialog-actions">
+          <button type="button" @click="closeImport()" :disabled="importing">
+            Cancel</button
+          ><button
+            class="primary-button"
+            type="submit"
+            :disabled="importing"
+            x-text="importing ? 'Importing…' : 'Import'"
+          ></button>
+        </div>
+      </form>
     </dialog>
 
     <p

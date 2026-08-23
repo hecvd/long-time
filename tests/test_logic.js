@@ -208,6 +208,19 @@ test("tracker page uses adaptive time and omits the introductory copy", () => {
 	assert.doesNotMatch(html, /A quiet living ledger|Time, made visible|trackerCountLabel|class="intro"/);
 });
 
+test("toolbar wires import and export", () => {
+	const html = fs.readFileSync(path.join(__dirname, "..", "web", "index.html"), "utf8");
+	assert.match(html, /@click="exportData\(\)"/);
+	assert.match(html, /@click="openImport\(\)"/);
+	assert.match(html, /x-ref="importDialog"/);
+	assert.match(html, /x-ref="importFile"/);
+
+	const app = fs.readFileSync(path.join(__dirname, "..", "web", "app.js"), "utf8");
+	assert.match(app, /async runImport\(\)/);
+	assert.match(app, /"\/api\/import"/);
+	assert.match(app, /window\.location\.href = "\/api\/export"/);
+});
+
 test("rail marks cleared milestones distinctly", () => {
 	const html = fs.readFileSync(path.join(__dirname, "..", "web", "index.html"), "utf8");
 	assert.match(html, /'cleared': entry\.kind === 'milestone' && !entryIsFuture\(tracker, entry\)/);

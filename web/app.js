@@ -97,6 +97,9 @@ window.longTimeApp = function longTimeApp() {
 		quickNotes: {},
 		quickNoteErrors: {},
 		savingQuickNoteId: null,
+		importMode: "append",
+		importError: "",
+		importing: false,
 		activeTrackerId: null,
 		confirmation: null,
 		deleting: false,
@@ -248,6 +251,62 @@ window.longTimeApp = function longTimeApp() {
 			this.$nextTick(() => {
 				this.statusMessage = message;
 			});
+		},
+
+		exportData() {
+			window.location.href = "/api/export";
+		},
+
+		openImport() {
+			this.rememberFocus();
+			this.importMode = "append";
+			this.importError = "";
+			if (this.$refs.importFile) this.$refs.importFile.value = "";
+			this.$refs.importDialog.showModal();
+		},
+
+		closeImport() {
+			if (this.importing) return;
+			this.$refs.importDialog.close();
+			this.restoreFocus();
+		},
+
+		async runImport() {
+			this.importError = "";
+			const file = this.$refs.importFile.files[0];
+			if (!file) {
+				this.importError = "Choose a file to import.";
+				return;
+			}
+			let data;
+			try {
+				data = JSON.parse(await file.text());
+			} catch (_error) {
+				this.importError = "That file is not valid JSON.";
+				return;
+			}
+			if (!data || !Array.isArray(data.trackers)) {
+				this.importError = "That file does not look like a Long Time export.";
+				return;
+			}
+			this.importing = true;
+			try {
+				const result = await api("/api/import", {
+					method: "POST",
+					body: { mode: this.importMode, trackers: data.trackers },
+				});
+				this.$refs.importDialog.close();
+				this.$refs.importFile.value = "";
+				await this.loadTrackers();
+				this.announce(
+					`Imported ${result.trackers} tracker${result.trackers === 1 ? "" : "s"}.`,
+				);
+				this.restoreFocus();
+			} catch (error) {
+				this.importError = error.message;
+			} finally {
+				this.importing = false;
+			}
 		},
 
 		openNewTracker() {

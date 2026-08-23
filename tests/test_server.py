@@ -76,6 +76,30 @@ class ServerTestCase(unittest.TestCase):
         status, _, _ = self.request(f"/api/trackers/{tracker['id']}", "DELETE")
         self.assertEqual(status, 204)
 
+    def test_export_and_import_over_http(self):
+        self.request("/api/trackers", "POST", {
+            "title": "Piano", "description": "", "started_at": "2024-01-01T00:00:00Z",
+        })
+        status, headers, body = self.request("/api/export")
+        self.assertEqual(status, 200)
+        self.assertIn("attachment", headers["Content-Disposition"])
+        export = json.loads(body)
+        self.assertEqual(export["version"], 1)
+        self.assertEqual(len(export["trackers"]), 1)
+
+        status, _, body = self.request("/api/import", "POST", {"mode": "append", "trackers": export["trackers"]})
+        self.assertEqual(status, 200)
+        self.assertEqual(json.loads(body)["trackers"], 1)
+        self.assertEqual(len(json.loads(self.request("/api/trackers")[2])), 2)
+
+        status, _, _ = self.request("/api/import", "POST", {"mode": "replace", "trackers": export["trackers"]})
+        self.assertEqual(status, 200)
+        self.assertEqual(len(json.loads(self.request("/api/trackers")[2])), 1)
+
+        status, _, body = self.request("/api/import", "POST", {"mode": "merge", "trackers": []})
+        self.assertEqual(status, 400)
+        self.assertIn("field_errors", json.loads(body)["error"])
+
     def test_api_validation_missing_and_bad_json(self):
         status, _, body = self.request("/api/trackers", "POST", {"title": "", "started_at": "bad"})
         self.assertEqual(status, 400)
