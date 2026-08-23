@@ -409,12 +409,17 @@ textarea {
 .rail li.cleared .rail-marker {
 	border-color: var(--cleared);
 	background: var(--cleared);
+	box-shadow: 0 0 0 4px color-mix(in srgb, var(--cleared) 22%, transparent);
 }
 .rail li.cleared .entry-kicker {
 	color: var(--cleared);
 }
+.rail li.cleared .entry-kicker::before {
+	content: "✓ ";
+}
 .rail li.cleared .entry-card {
-	border-color: color-mix(in srgb, var(--cleared) 45%, var(--hairline));
+	border-color: color-mix(in srgb, var(--cleared) 60%, var(--hairline));
+	background: color-mix(in srgb, var(--cleared) 12%, var(--ledger-sheet));
 }
 .entry-card {
 	border: 1px solid var(--hairline);
