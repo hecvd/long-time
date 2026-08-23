@@ -64,7 +64,22 @@ docker run --user "$(id -u):$(id -g)" -v "$PWD/config:/config" ... ghcr.io/hecvd
 ## Run without Docker
 
 ```bash
-python server.py --host 127.0.0.1 --port 5225 --database data/long-time.db
+python src/server.py --host 127.0.0.1 --port 5225 --database data/long-time.db
 ```
 
 Requires Python 3.11+ and no third-party dependencies.
+
+## Layout
+
+```
+src/     backend: HTTP server, SQLite storage, domain logic, migrations
+web/     frontend: static HTML, CSS, JS served at the web root
+tests/   Python and Node tests
+```
+
+## Tests
+
+```bash
+uvx pytest          # Python API, storage, and domain tests
+node --test tests   # frontend logic tests
+```
