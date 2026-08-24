@@ -106,6 +106,34 @@ Traefik (labels) and nginx-proxy-manager work the same way — set the DNS
 provider credentials and route the host to the `long-time` service on port
 `5225`. No app change required.
 
+A ready-to-edit Traefik stack (Cloudflare DNS-01) lives in
+[`docker-compose.traefik.yml`](docker-compose.traefik.yml): set the host and
+email, provide `CF_DNS_API_TOKEN`, and add a DNS-only A record
+`long-time.<domain>` → your LAN IP.
+
+**Providing the token securely (Portainer):** the Portainer stack
+*Environment variables* field is convenient but stored in Portainer's database
+in clear text. To keep the token off disk-in-the-clear and out of the stack
+definition, use a Docker secret file instead — lego reads any credential from a
+`*_FILE` variable:
+
+```yaml
+    environment:
+      - CF_DNS_API_TOKEN_FILE=/run/secrets/cf_dns_api_token
+    secrets:
+      - cf_dns_api_token
+
+secrets:
+  cf_dns_api_token:
+    file: ./secrets/cf_dns_api_token.txt   # chmod 600, git-ignored, host-only
+```
+
+Create `./secrets/cf_dns_api_token.txt` on the host with the token, `chmod 600`,
+and never commit it. Nothing sensitive then lives in the compose or Portainer's
+database. A pre-wired stack is in
+[`docker-compose.traefik.secrets.yml`](docker-compose.traefik.secrets.yml)
+(`secrets/`, `letsencrypt/`, and `.env` are git-ignored).
+
 ## Run without Docker
 
 ```bash
