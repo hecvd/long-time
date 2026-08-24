@@ -198,8 +198,13 @@ def main():
     parser.add_argument("--database", type=Path, default=Path("data/long-time.db"))
     parser.add_argument("--web-root", type=Path, default=Path(__file__).resolve().parent.parent / "web")
     args = parser.parse_args()
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(message)s",
+        datefmt="%Y-%m-%dT%H:%M:%S%z",
+    )
     server = create_server(args.host, args.port, args.database, args.web_root)
-    print(f"Long Time: http://{args.host}:{server.server_port}")
+    logging.info("Long Time listening on http://%s:%s", args.host, server.server_port)
     try:
         server.serve_forever()
     except KeyboardInterrupt:
