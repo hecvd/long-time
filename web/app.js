@@ -126,6 +126,9 @@ window.longTimeApp = function longTimeApp() {
 		async init() {
 			this.restorePreferences();
 			this.applyTheme();
+			this.registerServiceWorker();
+			this.trackers = LongTimeLogic.readCachedTrackers(localStorage);
+			if (this.trackers.length) this.loading = false;
 			this.$watch("filter", (value) =>
 				this.storePreference("long-time:filter", value),
 			);
@@ -149,7 +152,16 @@ window.longTimeApp = function longTimeApp() {
 			window.addEventListener("focus", this.onFocus);
 			document.addEventListener("visibilitychange", this.onVisibility);
 			this.startClock();
-			await this.loadTrackers();
+			await this.loadTrackers({ preserve: this.trackers.length > 0 });
+		},
+
+		registerServiceWorker() {
+			if (!("serviceWorker" in navigator)) return;
+			try {
+				navigator.serviceWorker.register("/sw.js").catch(() => {});
+			} catch (_error) {
+				/* insecure context or unsupported: fall back to data cache only */
+			}
 		},
 
 		destroy() {
@@ -225,6 +237,7 @@ window.longTimeApp = function longTimeApp() {
 			this.globalError = "";
 			try {
 				this.trackers = await api("/api/trackers");
+				LongTimeLogic.writeCachedTrackers(localStorage, this.trackers);
 				this.stale = false;
 				this.lastLoadedAt = Date.now();
 				if (
@@ -233,7 +246,7 @@ window.longTimeApp = function longTimeApp() {
 				)
 					this.expandedId = null;
 			} catch (error) {
-				if (preserve && this.trackers.length) this.stale = true;
+				if (this.trackers.length) this.stale = true;
 				else this.globalError = error.message;
 			} finally {
 				this.loading = false;

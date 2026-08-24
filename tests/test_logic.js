@@ -208,6 +208,35 @@ test("tracker page uses adaptive time and omits the introductory copy", () => {
 	assert.doesNotMatch(html, /A quiet living ledger|Time, made visible|trackerCountLabel|class="intro"/);
 });
 
+function fakeStorage(initial = {}) {
+	const map = new Map(Object.entries(initial));
+	return {
+		getItem: (key) => (map.has(key) ? map.get(key) : null),
+		setItem: (key, value) => map.set(key, String(value)),
+	};
+}
+
+test("cached trackers round-trip and degrade to empty", () => {
+	const storage = fakeStorage();
+	assert.deepEqual(logic.readCachedTrackers(storage), []);
+	logic.writeCachedTrackers(storage, [{ id: 1, title: "Piano" }]);
+	assert.deepEqual(logic.readCachedTrackers(storage), [{ id: 1, title: "Piano" }]);
+	assert.deepEqual(logic.readCachedTrackers(fakeStorage({ "long-time:data": "{not json" })), []);
+	assert.deepEqual(logic.readCachedTrackers(fakeStorage({ "long-time:data": '"scalar"' })), []);
+});
+
+test("offline shell and data cache are wired", () => {
+	const sw = fs.readFileSync(path.join(__dirname, "..", "web", "sw.js"), "utf8");
+	assert.match(sw, /const CACHE = "long-time-shell-v1"/);
+	assert.match(sw, /"\/app\.js"/);
+	assert.match(sw, /startsWith\("\/api\/"\)/);
+
+	const app = fs.readFileSync(path.join(__dirname, "..", "web", "app.js"), "utf8");
+	assert.match(app, /navigator\.serviceWorker\.register\("\/sw\.js"\)/);
+	assert.match(app, /readCachedTrackers\(localStorage\)/);
+	assert.match(app, /writeCachedTrackers\(localStorage, this\.trackers\)/);
+});
+
 test("toolbar wires import and export", () => {
 	const html = fs.readFileSync(path.join(__dirname, "..", "web", "index.html"), "utf8");
 	assert.match(html, /@click="exportData\(\)"/);

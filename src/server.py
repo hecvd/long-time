@@ -164,11 +164,21 @@ def create_handler(storage: Storage, static_dir: Path):
             if (static_root not in candidate.parents and candidate != static_root) or not candidate.is_file():
                 self.send_error(HTTPStatus.NOT_FOUND)
                 return
+            stat = candidate.stat()
+            etag = f'"{stat.st_mtime_ns:x}-{stat.st_size:x}"'
+            if self.headers.get("If-None-Match") == etag:
+                self.send_response(HTTPStatus.NOT_MODIFIED)
+                self.send_header("ETag", etag)
+                self.send_header("Cache-Control", "no-cache")
+                self.end_headers()
+                return
             body = candidate.read_bytes()
             content_type = mimetypes.guess_type(candidate.name)[0] or "application/octet-stream"
             self.send_response(HTTPStatus.OK)
             self.send_header("Content-Type", f"{content_type}; charset=utf-8")
             self.send_header("Content-Length", str(len(body)))
+            self.send_header("ETag", etag)
+            self.send_header("Cache-Control", "no-cache")
             self.end_headers()
             self.wfile.write(body)
 

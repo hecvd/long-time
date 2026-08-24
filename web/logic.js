@@ -5,6 +5,24 @@
 })(globalThis, () => {
 	const DAY_MS = 86_400_000;
 	const YEAR_DAYS = 365.2425;
+	const DATA_CACHE_KEY = "long-time:data";
+
+	function readCachedTrackers(storage) {
+		try {
+			const parsed = JSON.parse(storage.getItem(DATA_CACHE_KEY));
+			return Array.isArray(parsed) ? parsed : [];
+		} catch (_error) {
+			return [];
+		}
+	}
+
+	function writeCachedTrackers(storage, trackers) {
+		try {
+			storage.setItem(DATA_CACHE_KEY, JSON.stringify(trackers));
+		} catch (_error) {
+			/* ignore quota / unavailable storage */
+		}
+	}
 
 	function elapsedParts(startedAt, now = new Date()) {
 		const difference = now.getTime() - new Date(startedAt).getTime();
@@ -192,5 +210,7 @@
 		entryTimingLabel,
 		shouldRefreshOnFocus,
 		safePreference,
+		readCachedTrackers,
+		writeCachedTrackers,
 	};
 });
