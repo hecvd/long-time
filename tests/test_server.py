@@ -16,6 +16,7 @@ class ServerTestCase(unittest.TestCase):
         self.static_dir = root / "static"
         self.static_dir.mkdir()
         (self.static_dir / "index.html").write_text("<h1>Long Time</h1>", encoding="utf-8")
+        (self.static_dir / "sw.js").write_text("// service worker", encoding="utf-8")
         self.db_path = root / "long-time.db"
         self.server = create_server("127.0.0.1", 0, self.db_path, self.static_dir)
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
@@ -75,6 +76,19 @@ class ServerTestCase(unittest.TestCase):
         self.assertEqual(status, 204)
         status, _, _ = self.request(f"/api/trackers/{tracker['id']}", "DELETE")
         self.assertEqual(status, 204)
+
+    def test_static_revalidates_with_etag(self):
+        status, headers, _ = self.request("/")
+        self.assertEqual(status, 200)
+        etag = headers["ETag"]
+        self.assertTrue(etag)
+        self.assertEqual(headers["Cache-Control"], "no-cache")
+        status, _, _ = self.request("/", headers={"If-None-Match": etag})
+        self.assertEqual(status, 304)
+
+        status, headers, _ = self.request("/sw.js")
+        self.assertEqual(status, 200)
+        self.assertIn("javascript", headers.get_content_type())
 
     def test_export_and_import_over_http(self):
         self.request("/api/trackers", "POST", {

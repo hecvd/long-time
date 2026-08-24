@@ -61,6 +61,51 @@ writable by that user and `PUID`/`PGID` are ignored:
 docker run --user "$(id -u):$(id -g)" -v "$PWD/config:/config" ... ghcr.io/hecvd/long-time:latest
 ```
 
+## Offline use
+
+The page keeps a copy of your ledger and its own assets, so you can open and
+read it even while the server is down:
+
+- The last successful `/api/trackers` response is cached in `localStorage` and
+  shown instantly on load, then refreshed in the background (stale-while-
+  revalidate). If the server is unreachable, the cached data stays on screen
+  with a "Showing saved data" banner.
+- A service worker (`web/sw.js`) precaches the app shell so the page itself
+  loads offline.
+
+Writing (create/edit/delete/import) still needs the server — only reading works
+offline.
+
+**Service workers require a secure context** — `localhost` or HTTPS. Over plain
+`http://<lan-ip>` the browser blocks the service worker (the app falls back to
+the data cache only). To get full offline on other devices, serve it over HTTPS
+(next section).
+
+### HTTPS on a local network
+
+Keep this container plain HTTP and put a reverse proxy in front for TLS. Because
+you own a domain, the proxy can obtain a real, publicly-trusted certificate via
+the **DNS-01 ACME challenge** — which validates through a DNS record, so the
+service never needs to be exposed to the internet. Point `long-time.<domain>`
+at the LAN IP (public A record → private IP, or internal DNS) and you get
+warning-free HTTPS locally.
+
+Example `Caddyfile` (Caddy resolves the cert over DNS-01 with your provider's
+API token; swap in your DNS plugin):
+
+```
+long-time.example.com {
+    tls {
+        dns cloudflare {env.CF_API_TOKEN}
+    }
+    reverse_proxy long-time:5225
+}
+```
+
+Traefik (labels) and nginx-proxy-manager work the same way — set the DNS
+provider credentials and route the host to the `long-time` service on port
+`5225`. No app change required.
+
 ## Run without Docker
 
 ```bash
