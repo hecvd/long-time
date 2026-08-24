@@ -4,3 +4,9 @@ __pycache__/
 data/*.db
 data/*.db-shm
 data/*.db-wal
+
+# deployment secrets and TLS state — never commit
+.env
+secrets/
+letsencrypt/
+config/

@@ -1,0 +1,57 @@
+# Traefik + long-time with automatic HTTPS via the DNS-01 challenge (Cloudflare).
+# The domain's DNS must be on a provider Traefik/lego can call (Cloudflare here);
+# Strato has no ACME API. long-time stays plain HTTP behind Traefik, which
+# terminates TLS — a trusted cert makes the service worker work on every device.
+#
+# Set the host and email below, provide CF_DNS_API_TOKEN (see README for the
+# secure, file-based alternative), then add a DNS-only A record
+# long-time.<domain> -> your LAN IP.
+services:
+  traefik:
+    image: traefik:v3.3
+    container_name: traefik
+    restart: unless-stopped
+    command:
+      - --providers.docker=true
+      - --providers.docker.exposedbydefault=false
+      - --entrypoints.web.address=:80
+      - --entrypoints.websecure.address=:443
+      - --entrypoints.web.http.redirections.entrypoint.to=websecure
+      - --entrypoints.web.http.redirections.entrypoint.scheme=https
+      - --certificatesresolvers.le.acme.dnschallenge=true
+      - --certificatesresolvers.le.acme.dnschallenge.provider=cloudflare
+      - --certificatesresolvers.le.acme.email=you@example.com
+      - --certificatesresolvers.le.acme.storage=/letsencrypt/acme.json
+    environment:
+      - CF_DNS_API_TOKEN=${CF_DNS_API_TOKEN}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./letsencrypt:/letsencrypt
+    networks:
+      - proxy
+
+  long-time:
+    image: ghcr.io/hecvd/long-time:latest
+    container_name: long-time
+    restart: unless-stopped
+    environment:
+      - PUID=1000
+      - PGID=1000
+    volumes:
+      - ./config:/config
+    networks:
+      - proxy
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.long-time.rule=Host(`long-time.example.com`)
+      - traefik.http.routers.long-time.entrypoints=websecure
+      - traefik.http.routers.long-time.tls=true
+      - traefik.http.routers.long-time.tls.certresolver=le
+      - traefik.http.services.long-time.loadbalancer.server.port=5225
+
+networks:
+  proxy:
+    name: proxy
