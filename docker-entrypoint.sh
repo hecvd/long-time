@@ -5,7 +5,7 @@ PUID="${PUID:-1000}"
 PGID="${PGID:-1000}"
 
 run() {
-    exec python /app/src/server.py --host "$HOST" --port "$PORT" --database "$DATABASE" "$@"
+    exec /usr/local/bin/python /app/src/server.py --host "$HOST" --port "$PORT" --database "$DATABASE" "$@"
 }
 
 # When started as root, own the mounted data dir with the requested ids and

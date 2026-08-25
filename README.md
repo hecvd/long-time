@@ -136,14 +136,14 @@ database. A pre-wired stack is in
 
 ## Run without Docker
 
-Requires Python 3.11+ with FastAPI and uvicorn. [uv](https://docs.astral.sh/uv/) is the supported way to install dependencies and run commands.
+Requires Python 3.14+ with FastAPI and uvicorn. [uv](https://docs.astral.sh/uv/) is the supported way to install dependencies and run commands.
 
 ```bash
 uv sync
 uv run python src/server.py --host 127.0.0.1 --port 5225 --database data/long-time.db
 ```
 
-Or, with any 3.11+ interpreter after installing the project dependencies:
+Or, with any 3.14+ interpreter after installing the project dependencies:
 
 ```bash
 python src/server.py --host 127.0.0.1 --port 5225 --database data/long-time.db
