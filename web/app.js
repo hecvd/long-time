@@ -10,8 +10,10 @@ class ApiRequestError extends Error {
 async function api(path, options = {}) {
 	const request = { ...options, headers: { ...(options.headers || {}) } };
 	if (request.body && typeof request.body !== "string") {
-		request.headers["Content-Type"] = "application/json";
 		request.body = JSON.stringify(request.body);
+	}
+	if (request.method && request.method !== "GET") {
+		request.headers["Content-Type"] = "application/json";
 	}
 	let response;
 	try {
@@ -34,7 +36,7 @@ async function api(path, options = {}) {
 }
 
 function emptyTrackerForm() {
-	return { id: null, title: "", description: "", started_at: "" };
+	return { id: null, title: "", description: "", started_at: "", started_at_original: null };
 }
 
 function emptyEntryForm() {
@@ -46,6 +48,9 @@ function emptyEntryForm() {
 		occurred_at: "",
 		target_mode: "date",
 		target_at: "",
+		occurred_at_original: null,
+		target_at_original: null,
+		had_task: false,
 		target_value: 1,
 		target_unit: "years",
 		has_deadline: false,
@@ -68,13 +73,17 @@ function localInputValue(value) {
 	return new Date(date.getTime() - offset).toISOString().slice(0, 16);
 }
 
-function apiTimestamp(value) {
-	return value ? new Date(value).toISOString() : null;
+function timestampFromInput(input, original) {
+	if (!input) return null;
+	if (original && localInputValue(original) === input) return original;
+	return new Date(input).toISOString();
 }
 
 window.longTimeApp = function longTimeApp() {
 	return {
 		trackers: [],
+		durationUnits: [],
+		taskPeriodUnits: [],
 		loading: true,
 		stale: false,
 		globalError: "",
@@ -123,6 +132,7 @@ window.longTimeApp = function longTimeApp() {
 			this.applyTheme();
 			this.registerServiceWorker();
 			this.trackers = LongTimeLogic.readCachedTrackers(localStorage);
+			this.applyMeta(LongTimeLogic.readCachedMeta(localStorage));
 			if (this.trackers.length) this.loading = false;
 			this.$watch("filter", (value) => this.storePreference("long-time:filter", value));
 			this.$watch("sortMode", (value) => this.storePreference("long-time:sort", value));
@@ -140,7 +150,7 @@ window.longTimeApp = function longTimeApp() {
 			window.addEventListener("focus", this.onFocus);
 			document.addEventListener("visibilitychange", this.onVisibility);
 			this.startClock();
-			await this.loadTrackers({ preserve: this.trackers.length > 0 });
+			await Promise.all([this.loadTrackers({ preserve: this.trackers.length > 0 }), this.loadMeta()]);
 		},
 
 		registerServiceWorker() {
@@ -235,6 +245,25 @@ window.longTimeApp = function longTimeApp() {
 			}
 		},
 
+		async loadMeta() {
+			try {
+				const meta = await api("/api/meta");
+				this.applyMeta(meta);
+				LongTimeLogic.writeCachedMeta(localStorage, meta);
+			} catch (_error) {
+				/* keep cached catalog */
+			}
+		},
+
+		applyMeta(meta) {
+			this.durationUnits = meta?.duration_units || [];
+			this.taskPeriodUnits = meta?.task_period_units || [];
+		},
+
+		durationUnit(id) {
+			return this.durationUnits.find((unit) => unit.id === id) || {};
+		},
+
 		rememberFocus() {
 			this.returnFocus = document.activeElement;
 		},
@@ -320,6 +349,7 @@ window.longTimeApp = function longTimeApp() {
 				title: tracker.title,
 				description: tracker.description,
 				started_at: localInputValue(tracker.started_at),
+				started_at_original: tracker.started_at,
 			};
 			this.trackerErrors = {};
 			this.trackerFormError = "";
@@ -343,7 +373,7 @@ window.longTimeApp = function longTimeApp() {
 					body: {
 						title: this.trackerForm.title,
 						description: this.trackerForm.description,
-						started_at: apiTimestamp(this.trackerForm.started_at),
+						started_at: timestampFromInput(this.trackerForm.started_at, this.trackerForm.started_at_original),
 					},
 				});
 				this.$refs.trackerDialog.close();
@@ -431,6 +461,9 @@ window.longTimeApp = function longTimeApp() {
 				body: entry.body,
 				occurred_at: localInputValue(entry.occurred_at),
 				target_at: localInputValue(entry.target_at),
+				occurred_at_original: entry.occurred_at || null,
+				target_at_original: entry.target_at || null,
+				had_task: Boolean(entry.task),
 				target_mode: hasDeadline ? entry.target_mode : "date",
 				target_value: entry.target_value == null ? 1 : entry.target_value,
 				target_unit: entry.target_unit || "years",
@@ -472,18 +505,16 @@ window.longTimeApp = function longTimeApp() {
 			this.entryForm.task_items.splice(index, 1);
 		},
 
-		async saveEntry() {
-			this.savingEntry = true;
-			this.entryErrors = {};
-			this.entryFormError = "";
+		async saveEntry({ confirmed = false } = {}) {
 			const editing = Boolean(this.entryForm.id);
 			const payload = {
 				kind: this.entryForm.kind,
 				title: this.entryForm.title,
 				body: this.entryForm.body,
 			};
-			if (payload.kind === "note") payload.occurred_at = apiTimestamp(this.entryForm.occurred_at);
-			else {
+			if (payload.kind === "note") {
+				payload.occurred_at = timestampFromInput(this.entryForm.occurred_at, this.entryForm.occurred_at_original);
+			} else {
 				const items = this.entryForm.has_task
 					? this.entryForm.task_items
 							.map((item) => ({
@@ -493,10 +524,16 @@ window.longTimeApp = function longTimeApp() {
 							}))
 							.filter((item) => item.label)
 					: [];
+				if (editing && this.entryForm.had_task && !items.length && !confirmed) {
+					this.confirmation = { kind: "clear-task" };
+					this.$refs.confirmDialog.showModal();
+					return;
+				}
 				if (this.entryForm.has_deadline) {
 					payload.target_mode = this.entryForm.target_mode;
-					if (payload.target_mode === "date") payload.target_at = apiTimestamp(this.entryForm.target_at);
-					else {
+					if (payload.target_mode === "date") {
+						payload.target_at = timestampFromInput(this.entryForm.target_at, this.entryForm.target_at_original);
+					} else {
 						payload.target_value = Number(this.entryForm.target_value);
 						payload.target_unit = this.entryForm.target_unit;
 					}
@@ -511,6 +548,9 @@ window.longTimeApp = function longTimeApp() {
 					};
 				else payload.task = null;
 			}
+			this.savingEntry = true;
+			this.entryErrors = {};
+			this.entryFormError = "";
 			try {
 				await api(editing ? `/api/entries/${this.entryForm.id}` : `/api/trackers/${this.activeTrackerId}/entries`, {
 					method: editing ? "PUT" : "POST",
@@ -536,8 +576,14 @@ window.longTimeApp = function longTimeApp() {
 
 		closeConfirmation() {
 			if (this.deleting) return;
+			const clearing = this.confirmation?.kind === "clear-task";
 			this.$refs.confirmDialog.close();
-			this.restoreFocus();
+			if (!clearing) this.restoreFocus();
+		},
+
+		confirmClearTask() {
+			this.$refs.confirmDialog.close();
+			return this.saveEntry({ confirmed: true });
 		},
 
 		async confirmDelete() {
@@ -600,33 +646,14 @@ window.longTimeApp = function longTimeApp() {
 				.filter(Boolean)
 				.join(", ");
 		},
-		taskPendingPayload(entry) {
-			const payload = { kind: "milestone", title: entry.title, body: entry.body };
-			if (entry.target_mode === "date") {
-				payload.target_mode = "date";
-				payload.target_at = entry.target_at;
-			} else if (entry.target_mode === "duration") {
-				payload.target_mode = "duration";
-				payload.target_value = entry.target_value;
-				payload.target_unit = entry.target_unit;
-			} else payload.target_mode = "none";
-			payload.task = {
-				per_period: entry.task.per_period,
-				period_unit: entry.task.period_unit,
-				items: entry.task.items
-					.filter((item) => item.active)
-					.map((item) => ({ id: item.id, label: item.label, checked: item.checked })),
-			};
-			return payload;
-		},
 		async toggleTaskItem(entry, item) {
 			if (this.checkingInId) return;
 			this.checkingInId = entry.id;
 			item.checked = !item.checked;
 			try {
-				await api(`/api/entries/${entry.id}`, {
+				await api(`/api/entries/${entry.id}/task-items/${item.id}`, {
 					method: "PUT",
-					body: this.taskPendingPayload(entry),
+					body: { checked: item.checked },
 				});
 				LongTimeLogic.writeCachedTrackers(localStorage, this.trackers);
 			} catch (error) {

@@ -247,6 +247,24 @@ class StorageTestCase(unittest.TestCase):
         assert restored is not None
         self.assertEqual(restored["task"]["checkins"], [])
 
+    def test_omitting_task_on_update_keeps_checkins(self):
+        entry, _ = self._make_task([("A", True)])
+        self.storage.create_checkin(entry["id"])
+        renamed = self.storage.update_entry(entry["id"], {
+            "kind": "milestone", "title": "Renamed", "body": "", "occurred_at": None,
+            "target_mode": "none", "target_at": None, "target_value": None, "target_unit": None,
+        })
+        assert renamed is not None
+        self.assertEqual(renamed["title"], "Renamed")
+        self.assertEqual(len(renamed["task"]["checkins"]), 1)
+
+    def test_initialize_applies_migrations_without_executescript(self):
+        import inspect
+
+        from storage import Storage as StorageClass
+        self.assertNotIn("executescript", inspect.getsource(StorageClass.initialize))
+        self.assertIn("BEGIN IMMEDIATE", inspect.getsource(StorageClass.initialize))
+
     def test_update_task_reconciles_items(self):
         tracker = self._task_tracker()
         entry = self.storage.create_entry(tracker["id"], {
@@ -302,3 +320,69 @@ class StorageTestCase(unittest.TestCase):
         self.assertTrue(set(changed[-1]["checked_item_ids"]).issubset(active_ids))
         self.assertEqual(len(changed[-1]["checked_item_ids"]), 1)
         self.assertEqual(unchanged[0]["checked_item_ids"], changed[-1]["checked_item_ids"])
+
+    def test_entries_expose_resolved_target_at(self):
+        tracker = self.storage.create_tracker({
+            "title": "Piano", "description": "", "started_at": "2024-01-01T00:00:00Z",
+        })
+        duration = self.storage.create_entry(tracker["id"], {
+            "kind": "milestone", "title": "Two weeks", "body": "", "occurred_at": None,
+            "target_mode": "duration", "target_at": None, "target_value": 2, "target_unit": "weeks",
+        })
+        none = self.storage.create_entry(tracker["id"], {
+            "kind": "milestone", "title": "Task", "body": "", "occurred_at": None,
+            "target_mode": "none", "target_at": None, "target_value": None, "target_unit": None,
+            "task": {"per_period": 1, "period_unit": "day",
+                     "items": [{"id": None, "label": "A", "checked": False, "position": 0}]},
+        })
+        note = self.storage.create_entry(tracker["id"], {
+            "kind": "note", "title": "N", "body": "", "occurred_at": "2024-01-02T00:00:00Z",
+            "target_mode": None, "target_at": None, "target_value": None, "target_unit": None,
+        })
+        self.assertEqual(duration["resolved_target_at"], "2024-01-15T00:00:00Z")
+        self.assertEqual(none["resolved_target_at"], "2024-01-01T00:00:00Z")
+        self.assertIsNone(note["resolved_target_at"])
+
+    def test_get_tracker_does_not_scan_every_tracker(self):
+        first = self.storage.create_tracker({
+            "title": "One", "description": "", "started_at": "2024-01-01T00:00:00Z",
+        })
+        self.storage.create_tracker({
+            "title": "Two", "description": "", "started_at": "2024-01-02T00:00:00Z",
+        })
+        original = Storage.list_trackers
+
+        def boom(_self):
+            raise AssertionError("list_trackers should not run")
+
+        Storage.list_trackers = boom
+        try:
+            loaded = self.storage.get_tracker(first["id"])
+        finally:
+            Storage.list_trackers = original
+        self.assertEqual(loaded["title"], "One")
+        self.assertEqual(len(loaded["entries"]), 0)
+
+    def test_toggle_task_item_checked_does_not_rewrite_the_entry(self):
+        entry, ids = self._make_task([("A", False), ("B", True)])
+        self.storage.update_entry(entry["id"], {
+            "kind": "milestone", "title": "Keep me", "body": "", "occurred_at": None,
+            "target_mode": "none", "target_at": None, "target_value": None, "target_unit": None,
+        })
+        updated = self.storage.update_task_item_checked(entry["id"], ids["A"], True)
+        assert updated is not None
+        self.assertEqual(updated["title"], "Keep me")
+        items = {item["label"]: item["checked"] for item in updated["task"]["items"] if item["active"]}
+        self.assertEqual(items, {"A": True, "B": True})
+        self.assertIsNone(self.storage.update_task_item_checked(entry["id"], 999, True))
+
+    def test_schema_has_no_enum_check_constraints(self):
+        with self.storage._connect() as db:
+            entries_sql = db.execute("SELECT sql FROM sqlite_master WHERE name='entries'").fetchone()[0]
+            config_sql = db.execute("SELECT sql FROM sqlite_master WHERE name='task_config'").fetchone()[0]
+        self.assertNotIn("kind IN", entries_sql)
+        self.assertNotIn("target_mode IN", entries_sql)
+        self.assertNotIn("target_unit IN", entries_sql)
+        self.assertNotIn("period_unit IN", config_sql)
+        self.assertIn("length(title)", entries_sql)
+        self.assertIn("per_period >= 1", config_sql)

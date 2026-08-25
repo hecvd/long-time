@@ -6,9 +6,40 @@ import re
 from datetime import UTC, datetime, timedelta
 
 TIMESTAMP_WITH_ZONE = re.compile(r"(?:Z|[+-]\d{2}:\d{2})$")
-UNITS = {"hours", "days", "weeks", "four_weeks", "months", "years"}
-TASK_PERIOD_UNITS = {"day", "week"}
+DURATION_UNITS = {
+    "hours": {"kind": "fixed", "hours": 1, "whole_only": False, "label": "Hours"},
+    "days": {"kind": "fixed", "hours": 24, "whole_only": False, "label": "Days"},
+    "weeks": {"kind": "fixed", "hours": 168, "whole_only": False, "label": "Weeks"},
+    "four_weeks": {"kind": "fixed", "hours": 672, "whole_only": False, "label": "Months (4 weeks)"},
+    "months": {"kind": "calendar", "months": 1, "whole_only": True, "label": "Calendar months"},
+    "years": {"kind": "calendar", "years": 1, "whole_only": True, "label": "Calendar years"},
+}
+TASK_PERIOD_UNITS = {
+    "day": {"label": "day"},
+    "week": {"label": "week"},
+}
 MAX_TASK_ITEMS = 100
+MAX_OCCURRED_AT = 2**40
+MAX_CHECKIN_COUNT = 100_000
+
+
+def unit_catalog() -> dict:
+    return {
+        "duration_units": [
+            {"id": key, "kind": spec["kind"], "whole_only": spec["whole_only"], "label": spec["label"]}
+            for key, spec in DURATION_UNITS.items()
+        ],
+        "task_period_units": [
+            {"id": key, "label": spec["label"]}
+            for key, spec in TASK_PERIOD_UNITS.items()
+        ],
+    }
+
+
+def validate_task_item_checked(payload) -> bool:
+    if not isinstance(payload, dict) or not isinstance(payload.get("checked"), bool):
+        raise ValidationError({"checked": "Use true or false."})
+    return payload["checked"]
 
 
 class ValidationError(ValueError):
@@ -124,7 +155,7 @@ def validate_import_task(raw):
         if not isinstance(raw_checkin, dict):
             continue
         occurred = raw_checkin.get("occurred_at")
-        if not (isinstance(occurred, int) and not isinstance(occurred, bool)):
+        if not (isinstance(occurred, int) and not isinstance(occurred, bool) and 0 <= occurred <= MAX_OCCURRED_AT):
             continue
         raw_ids = raw_checkin.get("checked_item_ids")
         checked_ids = (
@@ -134,19 +165,24 @@ def validate_import_task(raw):
         try:
             checked_count = int(raw_checkin.get("checked_count") or 0)
             total_count = int(raw_checkin.get("total_count") or 0)
-        except (TypeError, ValueError):
+        except (TypeError, ValueError, OverflowError):
             continue
+        if not (0 <= checked_count <= MAX_CHECKIN_COUNT and 0 <= total_count <= MAX_CHECKIN_COUNT):
+            continue
+        changed = bool(raw_checkin.get("changed"))
+        if changed and checked_ids is None:
+            changed = False
         checkins.append({
             "occurred_at": occurred,
             "checked_count": checked_count,
             "total_count": total_count,
-            "changed": bool(raw_checkin.get("changed")),
+            "changed": changed,
             "checked_item_ids": checked_ids,
         })
     return {"per_period": per_period, "period_unit": unit, "items": items, "checkins": checkins}
 
 
-def validate_entry(payload) -> dict:
+def validate_entry(payload, *, updating=False) -> dict:
     fields = {}
     kind = payload.get("kind")
     title = _text(payload, "title", 120, True, fields)
@@ -154,7 +190,6 @@ def validate_entry(payload) -> dict:
     result = {
         "kind": kind, "title": title, "body": body, "occurred_at": None,
         "target_mode": None, "target_at": None, "target_value": None, "target_unit": None,
-        "task": None,
     }
     if kind not in {"note", "milestone"}:
         fields["kind"] = "Choose note or milestone."
@@ -170,7 +205,8 @@ def validate_entry(payload) -> dict:
             fields["task"] = "Notes cannot contain a checklist."
     else:
         mode = payload.get("target_mode")
-        result["task"] = validate_task(payload.get("task"), fields)
+        if "task" in payload:
+            result["task"] = validate_task(payload.get("task"), fields)
         if payload.get("occurred_at") not in (None, ""):
             fields["occurred_at"] = "Milestones cannot contain a note timestamp."
         if mode == "date":
@@ -188,11 +224,11 @@ def validate_entry(payload) -> dict:
             valid_number = isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
             if not valid_number or not 0 < value <= 1_000_000:
                 fields["target_value"] = "Enter a positive duration up to 1,000,000."
-            elif unit in {"months", "years"} and value % 1 != 0:
+            elif DURATION_UNITS.get(unit, {}).get("whole_only") and value % 1 != 0:
                 fields["target_value"] = "Calendar months and years must be whole numbers."
             else:
                 result["target_value"] = value
-            if unit not in UNITS:
+            if unit not in DURATION_UNITS:
                 fields["target_unit"] = "Choose hours, days, weeks, four-week months, calendar months, or years."
             else:
                 result["target_unit"] = unit
@@ -203,7 +239,7 @@ def validate_entry(payload) -> dict:
             for name in ("target_at", "target_value", "target_unit"):
                 if payload.get(name) not in (None, ""):
                     fields[name] = "Task-only milestones cannot contain a time target."
-            if payload.get("task") in (None, ""):
+            if payload.get("task") in (None, "") and ("task" in payload or not updating):
                 fields["task"] = "Add at least one checklist item or choose a deadline."
         else:
             fields["target_mode"] = "Choose a date, duration, or task target."
@@ -243,11 +279,13 @@ def validate_import(payload) -> tuple[str, list[dict]]:
             if not isinstance(raw_entry, dict):
                 raise ValidationError({entry_prefix: "Each entry must be an object."})
             try:
-                entry = validate_entry(raw_entry)
+                entry = validate_entry({key: value for key, value in raw_entry.items() if key != "task"}, updating=True)
             except ValidationError as error:
                 raise ValidationError(_prefixed(entry_prefix, error)) from error
             if isinstance(raw_entry.get("task"), dict):
                 entry["task"] = validate_import_task(raw_entry["task"])
+            if entry.get("kind") == "milestone" and entry.get("target_mode") == "none" and not entry.get("task"):
+                raise ValidationError({f"{entry_prefix}.task": "Add at least one checklist item or choose a deadline."})
             entries.append(entry)
         tracker["entries"] = entries
         trackers.append(tracker)
@@ -262,22 +300,32 @@ def add_calendar_months(value: datetime, months: int) -> datetime:
     return value.replace(year=year, month=month, day=day)
 
 
+def add_calendar_years(value: datetime, years: int) -> datetime:
+    try:
+        return value.replace(year=value.year + years)
+    except ValueError:
+        return value.replace(year=value.year + years, day=28)
+
+
 def resolve_milestone_target(started_at: str, entry: dict) -> str:
-    if entry.get("target_mode") == "date":
+    mode = entry.get("target_mode")
+    if mode == "date":
         return parse_timestamp(entry.get("target_at"), "target_at")
     start = datetime.fromisoformat(started_at.replace("Z", "+00:00"))
-    value, unit = entry["target_value"], entry["target_unit"]
-    if unit == "years":
-        try:
-            target = start.replace(year=start.year + int(value))
-        except ValueError:
-            target = start.replace(year=start.year + int(value), day=28)
-    elif unit == "months":
-        try:
-            target = add_calendar_months(start, int(value))
-        except (OverflowError, ValueError) as error:
-            raise ValidationError({"target_value": "The target is outside the supported date range."}) from error
-    else:
-        hours = value * {"hours": 1, "days": 24, "weeks": 168, "four_weeks": 672}[unit]
-        target = start + timedelta(hours=hours)
+    if mode == "none":
+        return utc_text(start)
+    spec = DURATION_UNITS.get(entry.get("target_unit"))
+    value = entry.get("target_value")
+    if spec is None:
+        raise ValidationError({"target_unit": "Choose hours, days, weeks, four-week months, calendar months, or years."})
+    try:
+        if spec["kind"] == "calendar":
+            if "years" in spec:
+                target = add_calendar_years(start, int(value) * spec["years"])
+            else:
+                target = add_calendar_months(start, int(value) * spec["months"])
+        else:
+            target = start + timedelta(hours=value * spec["hours"])
+    except (OverflowError, ValueError) as error:
+        raise ValidationError({"target_value": "The target is outside the supported date range."}) from error
     return utc_text(target)

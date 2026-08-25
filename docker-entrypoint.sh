@@ -14,7 +14,7 @@ run() {
 if [ "$(id -u)" = "0" ]; then
     mkdir -p "$(dirname "$DATABASE")"
     chown -R "$PUID:$PGID" "$(dirname "$DATABASE")"
-    exec su-exec "$PUID:$PGID" python /app/src/server.py --host "$HOST" --port "$PORT" --database "$DATABASE" "$@"
+    exec su-exec "$PUID:$PGID" "$0" "$@"
 fi
 
 run "$@"
