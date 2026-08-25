@@ -10,3 +10,5 @@ data/*.db-wal
 secrets/
 letsencrypt/
 config/
+
+docs/
