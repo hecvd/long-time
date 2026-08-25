@@ -49,6 +49,7 @@ function emptyEntryForm() {
 		target_value: 1,
 		target_unit: "years",
 		has_deadline: false,
+		has_task: false,
 		per_period: 1,
 		period_unit: "day",
 		task_items: [],
@@ -411,7 +412,6 @@ window.longTimeApp = function longTimeApp() {
 				kind,
 				occurred_at: localInputValue(new Date()),
 				target_at: localInputValue(new Date()),
-				task_items: kind === "milestone" ? [newTaskItem()] : [],
 			};
 			this.entryErrors = {};
 			this.entryFormError = "";
@@ -435,6 +435,7 @@ window.longTimeApp = function longTimeApp() {
 				target_value: entry.target_value == null ? 1 : entry.target_value,
 				target_unit: entry.target_unit || "years",
 				has_deadline: hasDeadline,
+				has_task: Boolean(entry.task),
 				per_period: entry.task ? entry.task.per_period : 1,
 				period_unit: entry.task ? entry.task.period_unit : "day",
 				task_items: entry.task
@@ -461,6 +462,9 @@ window.longTimeApp = function longTimeApp() {
 			this.restoreFocus();
 		},
 
+		ensureTaskItems() {
+			if (this.entryForm.has_task && !this.entryForm.task_items.length) this.addTaskItem();
+		},
 		addTaskItem() {
 			this.entryForm.task_items.push(newTaskItem());
 		},
@@ -480,13 +484,15 @@ window.longTimeApp = function longTimeApp() {
 			};
 			if (payload.kind === "note") payload.occurred_at = apiTimestamp(this.entryForm.occurred_at);
 			else {
-				const items = this.entryForm.task_items
-					.map((item) => ({
-						...(item.id ? { id: item.id } : {}),
-						label: (item.label || "").trim(),
-						checked: !!item.checked,
-					}))
-					.filter((item) => item.label);
+				const items = this.entryForm.has_task
+					? this.entryForm.task_items
+							.map((item) => ({
+								...(item.id ? { id: item.id } : {}),
+								label: (item.label || "").trim(),
+								checked: !!item.checked,
+							}))
+							.filter((item) => item.label)
+					: [];
 				if (this.entryForm.has_deadline) {
 					payload.target_mode = this.entryForm.target_mode;
 					if (payload.target_mode === "date") payload.target_at = apiTimestamp(this.entryForm.target_at);
@@ -584,11 +590,8 @@ window.longTimeApp = function longTimeApp() {
 			if (stats.latestRate) parts.push(`last ${stats.latestRate.checked}/${stats.latestRate.total}`);
 			return parts.join(" · ");
 		},
-		changedCheckins(entry) {
-			return entry.task.checkins
-				.filter((checkin) => checkin.changed)
-				.slice()
-				.reverse();
+		checkinHistory(entry) {
+			return entry.task.checkins.slice().reverse();
 		},
 		checkedLabels(entry, checkin) {
 			const byId = Object.fromEntries(entry.task.items.map((item) => [item.id, item.label]));

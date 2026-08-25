@@ -259,12 +259,12 @@
                   </div>
                   <details
                     class="task-history"
-                    x-show="entry.task.checkins.some(c => c.changed)"
+                    x-show="entry.task.checkins.length"
                   >
                     <summary>History</summary>
                     <ul>
                       <template
-                        x-for="checkin in changedCheckins(entry)"
+                        x-for="checkin in checkinHistory(entry)"
                         :key="checkin.id"
                       >
                         <li>
@@ -517,56 +517,65 @@
         ></template>
         <template x-if="entryForm.kind === 'milestone'">
           <div class="milestone-fields">
-            <fieldset class="task-editor">
-              <legend>Checklist <em>optional</em></legend>
-              <template x-for="(item, index) in entryForm.task_items" :key="item.key">
-                <div class="task-item-row">
-                  <input
-                    type="text"
-                    maxlength="120"
-                    placeholder="Checklist item"
-                    x-model="item.label"
-                    :aria-label="'Checklist item ' + (index + 1)"
-                  />
-                  <button
-                    type="button"
-                    class="danger-link"
-                    @click="removeTaskItem(index)"
-                    aria-label="Remove item"
+            <label class="deadline-toggle">
+              <input
+                type="checkbox"
+                x-model="entryForm.has_task"
+                @change="ensureTaskItems()"
+              /><span>Add a task</span>
+            </label>
+            <template x-if="entryForm.has_task">
+              <fieldset class="task-editor">
+                <legend>Checklist</legend>
+                <template x-for="(item, index) in entryForm.task_items" :key="item.key">
+                  <div class="task-item-row">
+                    <input
+                      type="text"
+                      maxlength="120"
+                      placeholder="Checklist item"
+                      x-model="item.label"
+                      :aria-label="'Checklist item ' + (index + 1)"
+                    />
+                    <button
+                      type="button"
+                      class="danger-link"
+                      @click="removeTaskItem(index)"
+                      aria-label="Remove item"
+                    >
+                      Remove
+                    </button>
+                    <small
+                      class="field-error"
+                      x-show="entryErrors['task.items[' + index + '].label']"
+                      x-text="entryErrors['task.items[' + index + '].label']"
+                    ></small>
+                  </div>
+                </template>
+                <button type="button" @click="addTaskItem()">Add item</button>
+                <div class="cadence-fields">
+                  <label
+                    ><span>Check in</span
+                    ><input type="number" min="1" max="1000" x-model="entryForm.per_period"
+                  /><small
+                      class="field-error"
+                      x-show="entryErrors['task.per_period']"
+                      x-text="entryErrors['task.per_period']"
+                    ></small></label
                   >
-                    Remove
-                  </button>
-                  <small
-                    class="field-error"
-                    x-show="entryErrors['task.items[' + index + '].label']"
-                    x-text="entryErrors['task.items[' + index + '].label']"
-                  ></small>
+                  <label
+                    ><span>per</span
+                    ><select x-model="entryForm.period_unit">
+                      <option value="day">day</option>
+                      <option value="week">week</option>
+                    </select><small
+                      class="field-error"
+                      x-show="entryErrors['task.period_unit']"
+                      x-text="entryErrors['task.period_unit']"
+                    ></small></label
+                  >
                 </div>
-              </template>
-              <button type="button" @click="addTaskItem()">Add item</button>
-              <div class="cadence-fields" x-show="entryForm.task_items.length">
-                <label
-                  ><span>Check in</span
-                  ><input type="number" min="1" max="1000" x-model="entryForm.per_period"
-                /><small
-                    class="field-error"
-                    x-show="entryErrors['task.per_period']"
-                    x-text="entryErrors['task.per_period']"
-                  ></small></label
-                >
-                <label
-                  ><span>per</span
-                  ><select x-model="entryForm.period_unit">
-                    <option value="day">day</option>
-                    <option value="week">week</option>
-                  </select><small
-                    class="field-error"
-                    x-show="entryErrors['task.period_unit']"
-                    x-text="entryErrors['task.period_unit']"
-                  ></small></label
-                >
-              </div>
-            </fieldset>
+              </fieldset>
+            </template>
             <label class="deadline-toggle">
               <input type="checkbox" x-model="entryForm.has_deadline" /><span
                 >Add a deadline</span
