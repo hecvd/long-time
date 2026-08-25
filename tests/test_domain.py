@@ -100,6 +100,27 @@ class DomainTestCase(unittest.TestCase):
             })
         self.assertIn("trackers[0].entries[0].title", raised.exception.fields)
 
+    def test_validate_import_skips_checkins_with_invalid_counts(self):
+        _, trackers = validate_import({
+            "mode": "replace",
+            "trackers": [{
+                "title": "Piano", "description": "", "started_at": "2024-01-01T00:00:00Z",
+                "entries": [{
+                    "kind": "milestone", "title": "M", "body": "", "target_mode": "none",
+                    "task": {
+                        "per_period": 1, "period_unit": "day",
+                        "items": [{"label": "A"}],
+                        "checkins": [
+                            {"occurred_at": 1, "checked_count": "nope", "total_count": 1, "changed": True},
+                            {"occurred_at": 2, "checked_count": 1, "total_count": 1, "changed": True},
+                        ],
+                    },
+                }],
+            }],
+        })
+        self.assertEqual(len(trackers[0]["entries"][0]["task"]["checkins"]), 1)
+        self.assertEqual(trackers[0]["entries"][0]["task"]["checkins"][0]["occurred_at"], 2)
+
     def test_calendar_months_require_whole_numbers(self):
         valid = validate_entry({
             "kind": "milestone", "title": "One month", "body": "",
@@ -112,3 +133,47 @@ class DomainTestCase(unittest.TestCase):
                 "target_mode": "duration", "target_value": 0.5, "target_unit": "months",
             })
         self.assertIn("whole number", raised.exception.fields["target_value"])
+
+    def test_task_only_milestone_validates(self):
+        result = validate_entry({
+            "kind": "milestone", "title": "Morning routine", "body": "", "target_mode": "none",
+            "task": {"per_period": 1, "period_unit": "day",
+                     "items": [{"label": "Push-ups", "checked": True}, {"id": 4, "label": "Read"}]},
+        })
+        self.assertEqual(result["target_mode"], "none")
+        self.assertEqual(result["task"]["per_period"], 1)
+        self.assertEqual(result["task"]["items"][0], {"id": None, "label": "Push-ups", "checked": True, "position": 0})
+        self.assertEqual(result["task"]["items"][1], {"id": 4, "label": "Read", "checked": False, "position": 1})
+
+    def test_milestone_with_neither_target_nor_task_is_rejected(self):
+        with self.assertRaises(ValidationError) as raised:
+            validate_entry({"kind": "milestone", "title": "Empty", "body": "", "target_mode": "none"})
+        self.assertIn("task", raised.exception.fields)
+
+    def test_note_rejects_task_field(self):
+        with self.assertRaises(ValidationError) as raised:
+            validate_entry({"kind": "note", "title": "N", "body": "", "occurred_at": "2024-01-01T00:00:00Z",
+                            "task": {"per_period": 1, "period_unit": "day", "items": [{"label": "x"}]}})
+        self.assertIn("task", raised.exception.fields)
+
+    def test_task_cadence_and_unit_bounds(self):
+        with self.assertRaises(ValidationError) as raised:
+            validate_entry({"kind": "milestone", "title": "M", "body": "", "target_mode": "none",
+                            "task": {"per_period": 0, "period_unit": "month", "items": [{"label": "x"}]}})
+        self.assertIn("task.per_period", raised.exception.fields)
+        self.assertIn("task.period_unit", raised.exception.fields)
+        self.assertNotIn("task", raised.exception.fields)
+
+    def test_task_requires_a_labeled_item(self):
+        with self.assertRaises(ValidationError) as raised:
+            validate_entry({"kind": "milestone", "title": "M", "body": "", "target_mode": "none",
+                            "task": {"per_period": 1, "period_unit": "day", "items": [{"label": "  "}]}})
+        self.assertIn("task.items[0].label", raised.exception.fields)
+
+    def test_deadline_and_task_can_coexist(self):
+        result = validate_entry({
+            "kind": "milestone", "title": "Both", "body": "", "target_mode": "duration",
+            "target_value": 3, "target_unit": "years",
+            "task": {"per_period": 2, "period_unit": "week", "items": [{"label": "x"}]}})
+        self.assertEqual(result["target_unit"], "years")
+        self.assertEqual(result["task"]["period_unit"], "week")

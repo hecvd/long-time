@@ -3,10 +3,12 @@ from __future__ import annotations
 import calendar
 import math
 import re
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 TIMESTAMP_WITH_ZONE = re.compile(r"(?:Z|[+-]\d{2}:\d{2})$")
 UNITS = {"hours", "days", "weeks", "four_weeks", "months", "years"}
+TASK_PERIOD_UNITS = {"day", "week"}
+MAX_TASK_ITEMS = 100
 
 
 class ValidationError(ValueError):
@@ -16,7 +18,7 @@ class ValidationError(ValueError):
 
 
 def utc_text(value: datetime) -> str:
-    return value.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+    return value.astimezone(UTC).isoformat().replace("+00:00", "Z")
 
 
 def parse_timestamp(value, field_name: str) -> str:
@@ -26,6 +28,10 @@ def parse_timestamp(value, field_name: str) -> str:
         return utc_text(datetime.fromisoformat(value.replace("Z", "+00:00")))
     except ValueError as error:
         raise ValidationError({field_name: "Enter a valid date and time."}) from error
+
+
+def _int_id(value):
+    return value if isinstance(value, int) and not isinstance(value, bool) else None
 
 
 def _text(payload, name: str, maximum: int, required: bool, fields: dict[str, str]) -> str:
@@ -52,6 +58,94 @@ def validate_tracker(payload) -> dict:
     return {"title": title, "description": description, "started_at": started_at}
 
 
+def validate_task(raw, fields: dict[str, str]):
+    if raw in (None, ""):
+        return None
+    if not isinstance(raw, dict):
+        fields["task"] = "Provide a checklist object."
+        return None
+    initial_keys = set(fields.keys())
+    items_raw = raw.get("items")
+    if not isinstance(items_raw, list) or not items_raw:
+        fields["task.items"] = "Add at least one checklist item."
+        items_raw = []
+    elif len(items_raw) > MAX_TASK_ITEMS:
+        fields["task.items"] = f"Use at most {MAX_TASK_ITEMS} items."
+        items_raw = []
+    items = []
+    for index, raw_item in enumerate(items_raw):
+        if not isinstance(raw_item, dict):
+            fields[f"task.items[{index}]"] = "Each item must be an object."
+            continue
+        label = raw_item.get("label")
+        label = label.strip() if isinstance(label, str) else ""
+        if not label:
+            fields[f"task.items[{index}].label"] = "Enter a label."
+        elif len(label) > 120:
+            fields[f"task.items[{index}].label"] = "Use at most 120 characters."
+        items.append({
+            "id": _int_id(raw_item.get("id")), "label": label,
+            "checked": bool(raw_item.get("checked")), "position": index,
+        })
+    per_period = raw.get("per_period")
+    if not (isinstance(per_period, int) and not isinstance(per_period, bool) and 1 <= per_period <= 1000):
+        fields["task.per_period"] = "Enter how many check-ins per period (1 or more)."
+    if raw.get("period_unit") not in TASK_PERIOD_UNITS:
+        fields["task.period_unit"] = "Choose day or week."
+    if set(fields.keys()) != initial_keys:
+        return None
+    return {"per_period": per_period, "period_unit": raw.get("period_unit"), "items": items}
+
+
+def validate_import_task(raw):
+    if not isinstance(raw, dict):
+        return None
+    items = []
+    for index, raw_item in enumerate(raw.get("items") or []):
+        if not isinstance(raw_item, dict):
+            continue
+        label = raw_item.get("label")
+        label = label.strip() if isinstance(label, str) else ""
+        if not label:
+            continue
+        position = raw_item.get("position")
+        items.append({
+            "id": _int_id(raw_item.get("id")), "label": label[:120],
+            "position": position if isinstance(position, int) and not isinstance(position, bool) else index,
+            "checked": bool(raw_item.get("checked")), "active": bool(raw_item.get("active", True)),
+        })
+    if not items:
+        return None
+    per_period = raw.get("per_period")
+    per_period = per_period if isinstance(per_period, int) and not isinstance(per_period, bool) and per_period >= 1 else 1
+    unit = raw.get("period_unit") if raw.get("period_unit") in TASK_PERIOD_UNITS else "day"
+    checkins = []
+    for raw_checkin in raw.get("checkins") or []:
+        if not isinstance(raw_checkin, dict):
+            continue
+        occurred = raw_checkin.get("occurred_at")
+        if not (isinstance(occurred, int) and not isinstance(occurred, bool)):
+            continue
+        raw_ids = raw_checkin.get("checked_item_ids")
+        checked_ids = (
+            [i for i in raw_ids if isinstance(i, int) and not isinstance(i, bool)]
+            if isinstance(raw_ids, list) else None
+        )
+        try:
+            checked_count = int(raw_checkin.get("checked_count") or 0)
+            total_count = int(raw_checkin.get("total_count") or 0)
+        except (TypeError, ValueError):
+            continue
+        checkins.append({
+            "occurred_at": occurred,
+            "checked_count": checked_count,
+            "total_count": total_count,
+            "changed": bool(raw_checkin.get("changed")),
+            "checked_item_ids": checked_ids,
+        })
+    return {"per_period": per_period, "period_unit": unit, "items": items, "checkins": checkins}
+
+
 def validate_entry(payload) -> dict:
     fields = {}
     kind = payload.get("kind")
@@ -60,6 +154,7 @@ def validate_entry(payload) -> dict:
     result = {
         "kind": kind, "title": title, "body": body, "occurred_at": None,
         "target_mode": None, "target_at": None, "target_value": None, "target_unit": None,
+        "task": None,
     }
     if kind not in {"note", "milestone"}:
         fields["kind"] = "Choose note or milestone."
@@ -71,12 +166,15 @@ def validate_entry(payload) -> dict:
         for name in ("target_mode", "target_at", "target_value", "target_unit"):
             if payload.get(name) not in (None, ""):
                 fields[name] = "Notes cannot contain milestone targets."
+        if payload.get("task") not in (None, ""):
+            fields["task"] = "Notes cannot contain a checklist."
     else:
         mode = payload.get("target_mode")
-        result["target_mode"] = mode
+        result["task"] = validate_task(payload.get("task"), fields)
         if payload.get("occurred_at") not in (None, ""):
             fields["occurred_at"] = "Milestones cannot contain a note timestamp."
         if mode == "date":
+            result["target_mode"] = "date"
             try:
                 result["target_at"] = parse_timestamp(payload.get("target_at"), "target_at")
             except ValidationError as error:
@@ -85,6 +183,7 @@ def validate_entry(payload) -> dict:
                 if payload.get(name) not in (None, ""):
                     fields[name] = "Date milestones cannot contain a duration."
         elif mode == "duration":
+            result["target_mode"] = "duration"
             value, unit = payload.get("target_value"), payload.get("target_unit")
             valid_number = isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
             if not valid_number or not 0 < value <= 1_000_000:
@@ -99,8 +198,15 @@ def validate_entry(payload) -> dict:
                 result["target_unit"] = unit
             if payload.get("target_at") not in (None, ""):
                 fields["target_at"] = "Duration milestones cannot contain a target date."
+        elif mode == "none":
+            result["target_mode"] = "none"
+            for name in ("target_at", "target_value", "target_unit"):
+                if payload.get(name) not in (None, ""):
+                    fields[name] = "Task-only milestones cannot contain a time target."
+            if payload.get("task") in (None, ""):
+                fields["task"] = "Add at least one checklist item or choose a deadline."
         else:
-            fields["target_mode"] = "Choose a date or duration target."
+            fields["target_mode"] = "Choose a date, duration, or task target."
     if fields:
         raise ValidationError(fields)
     return result
@@ -137,9 +243,12 @@ def validate_import(payload) -> tuple[str, list[dict]]:
             if not isinstance(raw_entry, dict):
                 raise ValidationError({entry_prefix: "Each entry must be an object."})
             try:
-                entries.append(validate_entry(raw_entry))
+                entry = validate_entry(raw_entry)
             except ValidationError as error:
                 raise ValidationError(_prefixed(entry_prefix, error)) from error
+            if isinstance(raw_entry.get("task"), dict):
+                entry["task"] = validate_import_task(raw_entry["task"])
+            entries.append(entry)
         tracker["entries"] = entries
         trackers.append(tracker)
     return mode, trackers

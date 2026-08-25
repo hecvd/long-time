@@ -17,31 +17,18 @@ async function api(path, options = {}) {
 	try {
 		response = await fetch(path, request);
 	} catch (_error) {
-		throw new ApiRequestError(
-			0,
-			"network_error",
-			"Long Time could not reach the server.",
-		);
+		throw new ApiRequestError(0, "network_error", "Long Time could not reach the server.");
 	}
 	if (response.status === 204) return null;
 	let payload;
 	try {
 		payload = await response.json();
 	} catch (_error) {
-		throw new ApiRequestError(
-			response.status,
-			"invalid_response",
-			"The server returned an unreadable response.",
-		);
+		throw new ApiRequestError(response.status, "invalid_response", "The server returned an unreadable response.");
 	}
 	if (!response.ok) {
 		const error = payload.error || {};
-		throw new ApiRequestError(
-			response.status,
-			error.code,
-			error.message || "The request failed.",
-			error.field_errors,
-		);
+		throw new ApiRequestError(response.status, error.code, error.message || "The request failed.", error.field_errors);
 	}
 	return payload;
 }
@@ -61,7 +48,16 @@ function emptyEntryForm() {
 		target_at: "",
 		target_value: 1,
 		target_unit: "years",
+		has_deadline: false,
+		per_period: 1,
+		period_unit: "day",
+		task_items: [],
 	};
+}
+
+let taskItemSeq = 0;
+function newTaskItem(fields = {}) {
+	return { id: null, key: `t${++taskItemSeq}`, label: "", checked: false, ...fields };
 }
 
 function localInputValue(value) {
@@ -103,16 +99,14 @@ window.longTimeApp = function longTimeApp() {
 		activeTrackerId: null,
 		confirmation: null,
 		deleting: false,
+		checkingInId: null,
 		now: new Date(),
 		lastLoadedAt: 0,
 		clockTimer: null,
 		returnFocus: null,
 
 		get visibleTrackers() {
-			return LongTimeLogic.sortTrackers(
-				LongTimeLogic.filterTrackers(this.trackers, this.filter),
-				this.sortMode,
-			);
+			return LongTimeLogic.sortTrackers(LongTimeLogic.filterTrackers(this.trackers, this.filter), this.sortMode);
 		},
 
 		get themeLabel() {
@@ -129,18 +123,11 @@ window.longTimeApp = function longTimeApp() {
 			this.registerServiceWorker();
 			this.trackers = LongTimeLogic.readCachedTrackers(localStorage);
 			if (this.trackers.length) this.loading = false;
-			this.$watch("filter", (value) =>
-				this.storePreference("long-time:filter", value),
-			);
-			this.$watch("sortMode", (value) =>
-				this.storePreference("long-time:sort", value),
-			);
-			this.$watch("expandedId", (value) =>
-				this.storePreference("long-time:expanded", value ?? ""),
-			);
+			this.$watch("filter", (value) => this.storePreference("long-time:filter", value));
+			this.$watch("sortMode", (value) => this.storePreference("long-time:sort", value));
+			this.$watch("expandedId", (value) => this.storePreference("long-time:expanded", value ?? ""));
 			this.onFocus = () => {
-				if (LongTimeLogic.shouldRefreshOnFocus(this.lastLoadedAt))
-					this.loadTrackers({ preserve: true });
+				if (LongTimeLogic.shouldRefreshOnFocus(this.lastLoadedAt)) this.loadTrackers({ preserve: true });
 			};
 			this.onVisibility = () => {
 				if (document.hidden) this.stopClock();
@@ -189,18 +176,18 @@ window.longTimeApp = function longTimeApp() {
 			} catch (_error) {
 				this.filter = "";
 			}
-			this.sortMode = LongTimeLogic.safePreference(
-				localStorage,
-				"long-time:sort",
+			this.sortMode = LongTimeLogic.safePreference(localStorage, "long-time:sort", "recent", [
 				"recent",
-				["recent", "start-asc", "start-desc", "name-asc", "name-desc"],
-			);
-			this.themeMode = LongTimeLogic.safePreference(
-				localStorage,
-				"long-time:theme",
+				"start-asc",
+				"start-desc",
+				"name-asc",
+				"name-desc",
+			]);
+			this.themeMode = LongTimeLogic.safePreference(localStorage, "long-time:theme", "system", [
 				"system",
-				["system", "light", "dark"],
-			);
+				"light",
+				"dark",
+			]);
 			try {
 				const value = localStorage.getItem("long-time:expanded");
 				this.expandedId = /^\d+$/.test(value || "") ? Number(value) : null;
@@ -218,15 +205,13 @@ window.longTimeApp = function longTimeApp() {
 		},
 
 		applyTheme() {
-			if (this.themeMode === "system")
-				delete document.documentElement.dataset.theme;
+			if (this.themeMode === "system") delete document.documentElement.dataset.theme;
 			else document.documentElement.dataset.theme = this.themeMode;
 		},
 
 		cycleTheme() {
 			const modes = ["system", "light", "dark"];
-			this.themeMode =
-				modes[(modes.indexOf(this.themeMode) + 1) % modes.length];
+			this.themeMode = modes[(modes.indexOf(this.themeMode) + 1) % modes.length];
 			this.applyTheme();
 			this.storePreference("long-time:theme", this.themeMode);
 			this.announce(this.themeLabel);
@@ -240,11 +225,7 @@ window.longTimeApp = function longTimeApp() {
 				LongTimeLogic.writeCachedTrackers(localStorage, this.trackers);
 				this.stale = false;
 				this.lastLoadedAt = Date.now();
-				if (
-					this.expandedId &&
-					!this.trackers.some((tracker) => tracker.id === this.expandedId)
-				)
-					this.expandedId = null;
+				if (this.expandedId && !this.trackers.some((tracker) => tracker.id === this.expandedId)) this.expandedId = null;
 			} catch (error) {
 				if (this.trackers.length) this.stale = true;
 				else this.globalError = error.message;
@@ -311,9 +292,7 @@ window.longTimeApp = function longTimeApp() {
 				this.$refs.importDialog.close();
 				this.$refs.importFile.value = "";
 				await this.loadTrackers();
-				this.announce(
-					`Imported ${result.trackers} tracker${result.trackers === 1 ? "" : "s"}.`,
-				);
+				this.announce(`Imported ${result.trackers} tracker${result.trackers === 1 ? "" : "s"}.`);
 				this.restoreFocus();
 			} catch (error) {
 				this.importError = error.message;
@@ -358,17 +337,14 @@ window.longTimeApp = function longTimeApp() {
 			this.trackerFormError = "";
 			const editing = Boolean(this.trackerForm.id);
 			try {
-				await api(
-					editing ? `/api/trackers/${this.trackerForm.id}` : "/api/trackers",
-					{
-						method: editing ? "PUT" : "POST",
-						body: {
-							title: this.trackerForm.title,
-							description: this.trackerForm.description,
-							started_at: apiTimestamp(this.trackerForm.started_at),
-						},
+				await api(editing ? `/api/trackers/${this.trackerForm.id}` : "/api/trackers", {
+					method: editing ? "PUT" : "POST",
+					body: {
+						title: this.trackerForm.title,
+						description: this.trackerForm.description,
+						started_at: apiTimestamp(this.trackerForm.started_at),
 					},
-				);
+				});
 				this.$refs.trackerDialog.close();
 				await this.loadTrackers({ preserve: true });
 				this.announce(editing ? "Tracker updated." : "Tracker created.");
@@ -435,6 +411,7 @@ window.longTimeApp = function longTimeApp() {
 				kind,
 				occurred_at: localInputValue(new Date()),
 				target_at: localInputValue(new Date()),
+				task_items: kind === "milestone" ? [newTaskItem()] : [],
 			};
 			this.entryErrors = {};
 			this.entryFormError = "";
@@ -444,11 +421,34 @@ window.longTimeApp = function longTimeApp() {
 		openEditEntry(tracker, entry) {
 			this.rememberFocus();
 			this.activeTrackerId = tracker.id;
+			const hasDeadline =
+				entry.kind === "milestone" && (entry.target_mode === "date" || entry.target_mode === "duration");
 			this.entryForm = {
 				...emptyEntryForm(),
-				...entry,
+				id: entry.id,
+				kind: entry.kind,
+				title: entry.title,
+				body: entry.body,
 				occurred_at: localInputValue(entry.occurred_at),
 				target_at: localInputValue(entry.target_at),
+				target_mode: hasDeadline ? entry.target_mode : "date",
+				target_value: entry.target_value == null ? 1 : entry.target_value,
+				target_unit: entry.target_unit || "years",
+				has_deadline: hasDeadline,
+				per_period: entry.task ? entry.task.per_period : 1,
+				period_unit: entry.task ? entry.task.period_unit : "day",
+				task_items: entry.task
+					? entry.task.items
+							.filter((item) => item.active)
+							.map((item) =>
+								newTaskItem({
+									id: item.id,
+									key: `id-${item.id}`,
+									label: item.label,
+									checked: item.checked,
+								}),
+							)
+					: [],
 			};
 			this.entryErrors = {};
 			this.entryFormError = "";
@@ -461,6 +461,13 @@ window.longTimeApp = function longTimeApp() {
 			this.restoreFocus();
 		},
 
+		addTaskItem() {
+			this.entryForm.task_items.push(newTaskItem());
+		},
+		removeTaskItem(index) {
+			this.entryForm.task_items.splice(index, 1);
+		},
+
 		async saveEntry() {
 			this.savingEntry = true;
 			this.entryErrors = {};
@@ -471,27 +478,38 @@ window.longTimeApp = function longTimeApp() {
 				title: this.entryForm.title,
 				body: this.entryForm.body,
 			};
-			if (payload.kind === "note")
-				payload.occurred_at = apiTimestamp(this.entryForm.occurred_at);
+			if (payload.kind === "note") payload.occurred_at = apiTimestamp(this.entryForm.occurred_at);
 			else {
-				payload.target_mode = this.entryForm.target_mode;
-				if (payload.target_mode === "date")
-					payload.target_at = apiTimestamp(this.entryForm.target_at);
-				else {
-					payload.target_value = Number(this.entryForm.target_value);
-					payload.target_unit = this.entryForm.target_unit;
+				const items = this.entryForm.task_items
+					.map((item) => ({
+						...(item.id ? { id: item.id } : {}),
+						label: (item.label || "").trim(),
+						checked: !!item.checked,
+					}))
+					.filter((item) => item.label);
+				if (this.entryForm.has_deadline) {
+					payload.target_mode = this.entryForm.target_mode;
+					if (payload.target_mode === "date") payload.target_at = apiTimestamp(this.entryForm.target_at);
+					else {
+						payload.target_value = Number(this.entryForm.target_value);
+						payload.target_unit = this.entryForm.target_unit;
+					}
+				} else {
+					payload.target_mode = "none";
 				}
+				if (items.length)
+					payload.task = {
+						per_period: Number(this.entryForm.per_period),
+						period_unit: this.entryForm.period_unit,
+						items,
+					};
+				else payload.task = null;
 			}
 			try {
-				await api(
-					editing
-						? `/api/entries/${this.entryForm.id}`
-						: `/api/trackers/${this.activeTrackerId}/entries`,
-					{
-						method: editing ? "PUT" : "POST",
-						body: payload,
-					},
-				);
+				await api(editing ? `/api/entries/${this.entryForm.id}` : `/api/trackers/${this.activeTrackerId}/entries`, {
+					method: editing ? "PUT" : "POST",
+					body: payload,
+				});
 				this.$refs.entryDialog.close();
 				await this.loadTrackers({ preserve: true });
 				this.announce(editing ? "Entry updated." : "Entry added.");
@@ -524,8 +542,7 @@ window.longTimeApp = function longTimeApp() {
 						? `/api/trackers/${this.confirmation.id}`
 						: `/api/entries/${this.confirmation.id}`;
 				await api(endpoint, { method: "DELETE" });
-				const label =
-					this.confirmation.kind === "tracker" ? "Tracker" : "Entry";
+				const label = this.confirmation.kind === "tracker" ? "Tracker" : "Entry";
 				this.$refs.confirmDialog.close();
 				await this.loadTrackers({ preserve: true });
 				this.announce(`${label} deleted.`);
@@ -544,21 +561,97 @@ window.longTimeApp = function longTimeApp() {
 			return LongTimeLogic.calendarDurationParts(tracker.started_at, this.now);
 		},
 		formattedClosestDuration(tracker) {
-			return LongTimeLogic.formatClosestDuration(
-				this.calendarDuration(tracker),
-			);
+			return LongTimeLogic.formatClosestDuration(this.calendarDuration(tracker));
+		},
+		railEntries(tracker) {
+			return (tracker.entries || []).filter((entry) => !entry.task);
+		},
+		taskEntries(tracker) {
+			return (tracker.entries || []).filter((entry) => entry.task);
+		},
+		trackerTaskStats(tracker) {
+			return LongTimeLogic.trackerTaskStats(tracker, this.now);
 		},
 		orderedEntries(tracker) {
-			return LongTimeLogic.orderedEntries(tracker);
+			return LongTimeLogic.orderedEntries({
+				...tracker,
+				entries: this.railEntries(tracker),
+			});
+		},
+		taskStatsLabel(entry) {
+			const stats = LongTimeLogic.taskStats(entry.task, this.now);
+			const parts = [`streak ${stats.currentStreak}`, `${stats.total} check-in${stats.total === 1 ? "" : "s"}`];
+			if (stats.latestRate) parts.push(`last ${stats.latestRate.checked}/${stats.latestRate.total}`);
+			return parts.join(" · ");
+		},
+		changedCheckins(entry) {
+			return entry.task.checkins
+				.filter((checkin) => checkin.changed)
+				.slice()
+				.reverse();
+		},
+		checkedLabels(entry, checkin) {
+			const byId = Object.fromEntries(entry.task.items.map((item) => [item.id, item.label]));
+			return (checkin.checked_item_ids || [])
+				.map((id) => byId[id])
+				.filter(Boolean)
+				.join(", ");
+		},
+		taskPendingPayload(entry) {
+			const payload = { kind: "milestone", title: entry.title, body: entry.body };
+			if (entry.target_mode === "date") {
+				payload.target_mode = "date";
+				payload.target_at = entry.target_at;
+			} else if (entry.target_mode === "duration") {
+				payload.target_mode = "duration";
+				payload.target_value = entry.target_value;
+				payload.target_unit = entry.target_unit;
+			} else payload.target_mode = "none";
+			payload.task = {
+				per_period: entry.task.per_period,
+				period_unit: entry.task.period_unit,
+				items: entry.task.items
+					.filter((item) => item.active)
+					.map((item) => ({ id: item.id, label: item.label, checked: item.checked })),
+			};
+			return payload;
+		},
+		async toggleTaskItem(entry, item) {
+			if (this.checkingInId) return;
+			this.checkingInId = entry.id;
+			item.checked = !item.checked;
+			try {
+				await api(`/api/entries/${entry.id}`, {
+					method: "PUT",
+					body: this.taskPendingPayload(entry),
+				});
+				LongTimeLogic.writeCachedTrackers(localStorage, this.trackers);
+			} catch (error) {
+				item.checked = !item.checked;
+				this.globalError = error.message;
+			} finally {
+				this.checkingInId = null;
+			}
+		},
+		async checkIn(entry) {
+			if (this.checkingInId) return;
+			this.checkingInId = entry.id;
+			try {
+				await api(`/api/entries/${entry.id}/checkins`, { method: "POST" });
+				await this.loadTrackers({ preserve: true });
+				this.announce("Checked in.");
+			} catch (error) {
+				this.globalError = error.message;
+			} finally {
+				this.checkingInId = null;
+			}
 		},
 		entryTimingLabel(tracker, entry) {
 			return LongTimeLogic.entryTimingLabel(tracker, entry, this.now);
 		},
 		entryIsFuture(tracker, entry) {
 			const timestamp =
-				entry.kind === "note"
-					? new Date(entry.occurred_at)
-					: LongTimeLogic.resolvedMilestoneTarget(tracker, entry);
+				entry.kind === "note" ? new Date(entry.occurred_at) : LongTimeLogic.resolvedMilestoneTarget(tracker, entry);
 			return timestamp > this.now;
 		},
 		formatTimestamp(value) {

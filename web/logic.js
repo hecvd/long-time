@@ -43,10 +43,7 @@
 			[
 				tracker.title,
 				tracker.description,
-				...(tracker.entries || []).flatMap((entry) => [
-					entry.title,
-					entry.body,
-				]),
+				...(tracker.entries || []).flatMap((entry) => [entry.title, entry.body]),
 			].some((value) =>
 				String(value || "")
 					.toLocaleLowerCase()
@@ -59,14 +56,10 @@
 		const result = trackers.slice();
 		const comparators = {
 			recent: (a, b) => Date.parse(b.updated_at) - Date.parse(a.updated_at),
-			"start-asc": (a, b) =>
-				Date.parse(a.started_at) - Date.parse(b.started_at),
-			"start-desc": (a, b) =>
-				Date.parse(b.started_at) - Date.parse(a.started_at),
-			"name-asc": (a, b) =>
-				a.title.localeCompare(b.title, undefined, { sensitivity: "base" }),
-			"name-desc": (a, b) =>
-				b.title.localeCompare(a.title, undefined, { sensitivity: "base" }),
+			"start-asc": (a, b) => Date.parse(a.started_at) - Date.parse(b.started_at),
+			"start-desc": (a, b) => Date.parse(b.started_at) - Date.parse(a.started_at),
+			"name-asc": (a, b) => a.title.localeCompare(b.title, undefined, { sensitivity: "base" }),
+			"name-desc": (a, b) => b.title.localeCompare(a.title, undefined, { sensitivity: "base" }),
 		};
 		return result.sort(comparators[mode] || comparators.recent);
 	}
@@ -100,10 +93,7 @@
 		let cursor = addCalendarYears(earlier, years);
 		if (cursor > later) cursor = addCalendarYears(earlier, --years);
 
-		let months =
-			(later.getUTCFullYear() - cursor.getUTCFullYear()) * 12 +
-			later.getUTCMonth() -
-			cursor.getUTCMonth();
+		let months = (later.getUTCFullYear() - cursor.getUTCFullYear()) * 12 + later.getUTCMonth() - cursor.getUTCMonth();
 		let monthCursor = addCalendarMonths(cursor, months);
 		if (monthCursor > later) monthCursor = addCalendarMonths(cursor, --months);
 
@@ -130,6 +120,7 @@
 
 	function resolvedMilestoneTarget(tracker, entry) {
 		if (entry.target_mode === "date") return new Date(entry.target_at);
+		if (entry.target_mode === "none") return new Date(tracker.started_at);
 		const start = new Date(tracker.started_at);
 		const value = Number(entry.target_value);
 		if (entry.target_unit === "years") return addCalendarYears(start, value);
@@ -159,8 +150,7 @@
 
 	function orderedEntries(tracker) {
 		return (tracker.entries || []).slice().sort((a, b) => {
-			const difference =
-				entryTimestamp(tracker, b) - entryTimestamp(tracker, a);
+			const difference = entryTimestamp(tracker, b) - entryTimestamp(tracker, a);
 			return difference || a.id - b.id;
 		});
 	}
@@ -183,6 +173,61 @@
 		}
 		const difference = timestamp - now;
 		return `${conciseDuration(Math.abs(difference))} ${difference > 0 ? "remaining" : "ago"}`;
+	}
+
+	function periodOrdinal(date, unit) {
+		const dayOrdinal = Math.floor(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()) / DAY_MS);
+		if (unit !== "week") return dayOrdinal;
+		const isoDow = (date.getDay() + 6) % 7;
+		// Unix day 0 is Thursday, so (dayOrdinal - Monday offset) is never divisible by 7.
+		return Math.round((dayOrdinal - isoDow) / 7);
+	}
+
+	function taskStats(task, now = new Date()) {
+		const checkins = task?.checkins || [];
+		const perPeriod = task?.per_period || 1;
+		const unit = task?.period_unit || "day";
+		const total = checkins.length;
+		const last = checkins.reduce((latest, checkin) => {
+			if (!latest || checkin.occurred_at > latest.occurred_at) return checkin;
+			return latest;
+		}, null);
+		const latestRate = last ? { checked: last.checked_count, total: last.total_count } : null;
+
+		const counts = new Map();
+		for (const checkin of checkins) {
+			const ordinal = periodOrdinal(new Date(checkin.occurred_at * 1000), unit);
+			counts.set(ordinal, (counts.get(ordinal) || 0) + 1);
+		}
+		const satisfied = new Set();
+		for (const [ordinal, count] of counts) if (count >= perPeriod) satisfied.add(ordinal);
+
+		const nowOrdinal = periodOrdinal(now, unit);
+		let currentStreak = 0;
+		for (let ordinal = satisfied.has(nowOrdinal) ? nowOrdinal : nowOrdinal - 1; satisfied.has(ordinal); ordinal--)
+			currentStreak++;
+
+		let longestStreak = 0;
+		let run = 0;
+		let previous = null;
+		for (const ordinal of [...satisfied].sort((a, b) => a - b)) {
+			run = previous !== null && ordinal === previous + 1 ? run + 1 : 1;
+			if (run > longestStreak) longestStreak = run;
+			previous = ordinal;
+		}
+		return { currentStreak, longestStreak, total, latestRate };
+	}
+
+	function trackerTaskStats(tracker, now = new Date()) {
+		const tasks = (tracker.entries || []).filter((entry) => entry.task);
+		let checkins = 0;
+		let currentStreak = 0;
+		for (const entry of tasks) {
+			const stats = taskStats(entry.task, now);
+			checkins += stats.total;
+			if (stats.currentStreak > currentStreak) currentStreak = stats.currentStreak;
+		}
+		return { tasks: tasks.length, checkins, currentStreak };
 	}
 
 	function shouldRefreshOnFocus(lastLoadedAt, now = Date.now()) {
@@ -212,5 +257,8 @@
 		safePreference,
 		readCachedTrackers,
 		writeCachedTrackers,
+		periodOrdinal,
+		taskStats,
+		trackerTaskStats,
 	};
 });

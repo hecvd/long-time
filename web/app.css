@@ -327,13 +327,20 @@ textarea {
 .tracker-detail {
 	padding: 28px;
 }
+.measurement-stack {
+	display: grid;
+	gap: 8px;
+	margin-bottom: 18px;
+}
 .measurements {
 	display: grid;
 	grid-template-columns: repeat(4, 1fr);
 	border: 1px solid var(--hairline);
 	border-radius: 8px;
 	background: var(--ledger-inset);
-	margin-bottom: 18px;
+}
+.measurements.task-measurements {
+	grid-template-columns: repeat(3, 1fr);
 }
 .measurements div {
 	padding: 14px;
@@ -375,7 +382,12 @@ textarea {
 	margin: 0;
 	font-size: 24px;
 }
-.empty-rail {
+.task-list {
+	margin-top: 16px;
+	display: grid;
+	gap: 16px;
+}
+.empty-section {
 	margin: 20px 0 0;
 	border: 1px dashed var(--hairline);
 	border-radius: 8px;
@@ -641,4 +653,63 @@ time,
 		animation-duration: 0.01ms !important;
 		transition-duration: 0.01ms !important;
 	}
+}
+
+.check-in-card {
+	border: 1px solid var(--hairline);
+	border-radius: 8px;
+	padding: 12px 16px;
+	display: grid;
+	gap: 8px;
+}
+.check-in-head {
+	display: flex;
+	justify-content: space-between;
+	align-items: baseline;
+	gap: 8px;
+}
+.task-checklist {
+	list-style: none;
+	margin: 0;
+	padding: 0;
+	display: grid;
+	gap: 4px;
+}
+.task-checklist label {
+	display: flex;
+	gap: 8px;
+	align-items: center;
+}
+.task-checklist input[type="checkbox"],
+.deadline-toggle input {
+	width: auto;
+	min-height: auto;
+	padding: 0;
+	flex: none;
+}
+.check-in-foot {
+	display: flex;
+	justify-content: space-between;
+	align-items: center;
+	gap: 12px;
+}
+.task-stats {
+	margin: 0;
+	font-size: 0.85rem;
+	opacity: 0.8;
+}
+.task-item-row {
+	display: flex;
+	gap: 8px;
+	align-items: center;
+	margin-bottom: 4px;
+}
+.task-item-row input {
+	flex: 1;
+	min-width: 0;
+}
+.cadence-fields {
+	display: flex;
+	gap: 12px;
+	margin-top: 8px;
 }
