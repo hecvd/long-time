@@ -6,8 +6,17 @@ from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 
+from domain import ValidationError, resolve_milestone_target
+
 MIGRATIONS_DIR = Path(__file__).resolve().parent / "migrations"
 ENTRY_FIELDS = ("kind", "title", "body", "occurred_at", "target_mode", "target_at", "target_value", "target_unit")
+
+
+def _sql_statements(sql: str):
+    for chunk in sql.split(";"):
+        statement = chunk.strip()
+        if statement:
+            yield statement
 
 
 class Storage:
@@ -15,9 +24,11 @@ class Storage:
         self.path = Path(path)
 
     @contextmanager
-    def _connect(self):
+    def _connect(self, immediate=False):
         connection = sqlite3.connect(self.path, timeout=5)
         connection.row_factory = sqlite3.Row
+        if immediate:
+            connection.isolation_level = "IMMEDIATE"
         connection.execute("PRAGMA foreign_keys = ON")
         try:
             yield connection
@@ -126,28 +137,74 @@ class Storage:
 
     def initialize(self):
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        with self._connect() as db:
-            db.execute(
+        connection = sqlite3.connect(self.path, timeout=5)
+        connection.isolation_level = None
+        try:
+            connection.execute("PRAGMA foreign_keys = ON")
+            connection.execute("PRAGMA journal_mode=WAL")
+            connection.execute("BEGIN IMMEDIATE")
+            connection.execute(
                 "CREATE TABLE IF NOT EXISTS schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL)"
             )
-            applied = {row[0] for row in db.execute("SELECT version FROM schema_migrations")}
+            connection.execute("COMMIT")
+            applied = {row[0] for row in connection.execute("SELECT version FROM schema_migrations")}
             for path in sorted(MIGRATIONS_DIR.glob("*.sql")):
                 version = int(path.name.split("_", 1)[0])
                 if version in applied:
                     continue
-                db.executescript(path.read_text(encoding="utf-8"))
-                db.execute(
-                    "INSERT INTO schema_migrations(version, applied_at) VALUES (?, ?)",
-                    (version, self._now()),
-                )
+                connection.execute("BEGIN IMMEDIATE")
+                try:
+                    for statement in _sql_statements(path.read_text(encoding="utf-8")):
+                        connection.execute(statement)
+                    connection.execute(
+                        "INSERT INTO schema_migrations(version, applied_at) VALUES (?, ?)",
+                        (version, self._now()),
+                    )
+                    connection.execute("COMMIT")
+                except Exception:
+                    connection.execute("ROLLBACK")
+                    raise
+        finally:
+            connection.close()
 
     def list_trackers(self):
         with self._connect() as db:
+            return self._assemble_trackers(db)
+
+    def get_tracker(self, tracker_id):
+        with self._connect() as db:
+            trackers = self._assemble_trackers(db, tracker_id)
+        return trackers[0] if trackers else None
+
+    def _assemble_trackers(self, db, tracker_id=None):
+        if tracker_id is None:
             trackers = [dict(row) for row in db.execute("SELECT * FROM trackers ORDER BY id")]
             entries = [dict(row) for row in db.execute("SELECT * FROM entries ORDER BY id")]
             configs = {row["entry_id"]: dict(row) for row in db.execute("SELECT * FROM task_config")}
             item_rows = [dict(row) for row in db.execute("SELECT * FROM task_items ORDER BY entry_id, position, id")]
             checkin_rows = [dict(row) for row in db.execute("SELECT * FROM task_checkins ORDER BY entry_id, id")]
+        else:
+            trackers = [dict(row) for row in db.execute("SELECT * FROM trackers WHERE id=?", (tracker_id,))]
+            entries = [dict(row) for row in db.execute(
+                "SELECT * FROM entries WHERE tracker_id=? ORDER BY id", (tracker_id,)
+            )]
+            entry_ids = [entry["id"] for entry in entries]
+            if entry_ids:
+                placeholders = ",".join("?" * len(entry_ids))
+                configs = {
+                    row["entry_id"]: dict(row)
+                    for row in db.execute(f"SELECT * FROM task_config WHERE entry_id IN ({placeholders})", entry_ids)
+                }
+                item_rows = [dict(row) for row in db.execute(
+                    f"SELECT * FROM task_items WHERE entry_id IN ({placeholders}) ORDER BY entry_id, position, id",
+                    entry_ids,
+                )]
+                checkin_rows = [dict(row) for row in db.execute(
+                    f"SELECT * FROM task_checkins WHERE entry_id IN ({placeholders}) ORDER BY entry_id, id",
+                    entry_ids,
+                )]
+            else:
+                configs, item_rows, checkin_rows = {}, [], []
         items_by = {}
         for item in item_rows:
             items_by.setdefault(item["entry_id"], []).append(item)
@@ -155,19 +212,18 @@ class Storage:
         for checkin in checkin_rows:
             checkins_by.setdefault(checkin["entry_id"], []).append(checkin)
         grouped = {tracker["id"]: [] for tracker in trackers}
+        started = {tracker["id"]: tracker["started_at"] for tracker in trackers}
         for entry in entries:
             entry["task"] = self._overlay(
                 configs.get(entry["id"]),
                 items_by.get(entry["id"], []),
                 checkins_by.get(entry["id"], []),
             )
+            self._decorate_entry(entry, started.get(entry["tracker_id"]))
             grouped.get(entry["tracker_id"], []).append(entry)
         for tracker in trackers:
             tracker["entries"] = grouped[tracker["id"]]
         return trackers
-
-    def get_tracker(self, tracker_id):
-        return next((item for item in self.list_trackers() if item["id"] == tracker_id), None)
 
     def export(self):
         return {"version": 1, "exported_at": self._now(), "trackers": self.list_trackers()}
@@ -222,19 +278,39 @@ class Storage:
 
     def get_entry(self, entry_id):
         with self._connect() as db:
-            row = db.execute("SELECT * FROM entries WHERE id=?", (entry_id,)).fetchone()
-            if row is None:
-                return None
-            entry = dict(row)
-            config = self._dict(db.execute("SELECT * FROM task_config WHERE entry_id=?", (entry_id,)).fetchone())
-            item_rows = [dict(r) for r in db.execute(
-                "SELECT * FROM task_items WHERE entry_id=? ORDER BY position, id", (entry_id,)
-            )]
-            checkin_rows = [dict(r) for r in db.execute(
-                "SELECT * FROM task_checkins WHERE entry_id=? ORDER BY id", (entry_id,)
-            )]
-            entry["task"] = self._overlay(config, item_rows, checkin_rows)
-            return entry
+            return self._load_entry(db, entry_id)
+
+    @staticmethod
+    def _load_entry(db, entry_id):
+        row = db.execute(
+            "SELECT entries.*, trackers.started_at AS tracker_started_at "
+            "FROM entries JOIN trackers ON trackers.id = entries.tracker_id WHERE entries.id=?",
+            (entry_id,),
+        ).fetchone()
+        if row is None:
+            return None
+        entry = dict(row)
+        started_at = entry.pop("tracker_started_at")
+        config = Storage._dict(db.execute("SELECT * FROM task_config WHERE entry_id=?", (entry_id,)).fetchone())
+        item_rows = [dict(r) for r in db.execute(
+            "SELECT * FROM task_items WHERE entry_id=? ORDER BY position, id", (entry_id,)
+        )]
+        checkin_rows = [dict(r) for r in db.execute(
+            "SELECT * FROM task_checkins WHERE entry_id=? ORDER BY id", (entry_id,)
+        )]
+        entry["task"] = Storage._overlay(config, item_rows, checkin_rows)
+        return Storage._decorate_entry(entry, started_at)
+
+    @staticmethod
+    def _decorate_entry(entry, started_at):
+        if entry.get("kind") == "milestone":
+            try:
+                entry["resolved_target_at"] = resolve_milestone_target(started_at, entry)
+            except (ValidationError, KeyError, TypeError):
+                entry["resolved_target_at"] = None
+        else:
+            entry["resolved_target_at"] = None
+        return entry
 
     def create_entry(self, tracker_id, data):
         now = self._now()
@@ -253,56 +329,79 @@ class Storage:
         return self.get_entry(entry_id)
 
     def update_entry(self, entry_id, data):
-        existing = self.get_entry(entry_id)
-        if existing is None:
-            return None
         now = self._now()
         values = tuple(data[key] for key in ENTRY_FIELDS)
-        with self._connect() as db:
-            db.execute(
-                "UPDATE entries SET kind=?,title=?,body=?,occurred_at=?,target_mode=?,target_at=?,target_value=?,target_unit=?,updated_at=? WHERE id=?",
-                (*values, now, entry_id),
-            )
-            if data.get("task"):
-                self._reconcile_task(db, entry_id, data["task"], now)
-            elif "task" in data and data["task"] is None:
-                db.execute("DELETE FROM task_checkins WHERE entry_id=?", (entry_id,))
-                db.execute("DELETE FROM task_items WHERE entry_id=?", (entry_id,))
-                db.execute("DELETE FROM task_config WHERE entry_id=?", (entry_id,))
-            db.execute("UPDATE trackers SET updated_at=? WHERE id=?", (now, existing["tracker_id"]))
+        try:
+            with self._connect(immediate=True) as db:
+                row = db.execute("SELECT tracker_id FROM entries WHERE id=?", (entry_id,)).fetchone()
+                if row is None:
+                    return None
+                db.execute(
+                    "UPDATE entries SET kind=?,title=?,body=?,occurred_at=?,target_mode=?,target_at=?,target_value=?,target_unit=?,updated_at=? WHERE id=?",
+                    (*values, now, entry_id),
+                )
+                if data.get("task"):
+                    self._reconcile_task(db, entry_id, data["task"], now)
+                elif "task" in data and data["task"] is None:
+                    db.execute("DELETE FROM task_checkins WHERE entry_id=?", (entry_id,))
+                    db.execute("DELETE FROM task_items WHERE entry_id=?", (entry_id,))
+                    db.execute("DELETE FROM task_config WHERE entry_id=?", (entry_id,))
+                db.execute("UPDATE trackers SET updated_at=? WHERE id=?", (now, row["tracker_id"]))
+        except sqlite3.IntegrityError:
+            return None
         return self.get_entry(entry_id)
 
     def create_checkin(self, entry_id):
-        entry = self.get_entry(entry_id)
-        if entry is None or entry["kind"] != "milestone" or not entry.get("task"):
-            return None
         now_dt = datetime.now(UTC)
         now = now_dt.isoformat().replace("+00:00", "Z")
         occurred_at = int(now_dt.timestamp())
-        items = [item for item in entry["task"]["items"] if item["active"]]
-        checked_ids = sorted(item["id"] for item in items if item["checked"])
-        total = len(items)
-        with self._connect() as db:
-            last_changed = db.execute(
-                "SELECT checked_item_ids, total_count FROM task_checkins WHERE entry_id=? AND changed=1 ORDER BY id DESC LIMIT 1",
-                (entry_id,),
-            ).fetchone()
-            if last_changed is None:
-                changed = True
-            else:
-                previous = set(json.loads(last_changed["checked_item_ids"] or "[]"))
-                changed = set(checked_ids) != previous or total != last_changed["total_count"]
-            cursor = db.execute(
-                "INSERT INTO task_checkins(entry_id, occurred_at, checked_count, total_count, changed, checked_item_ids) VALUES (?, ?, ?, ?, ?, ?)",
-                (entry_id, occurred_at, len(checked_ids), total, 1 if changed else 0, json.dumps(checked_ids)),
-            )
-            db.execute("UPDATE trackers SET updated_at=? WHERE id=?", (now, entry["tracker_id"]))
-            checkin_id = cursor.lastrowid
+        try:
+            with self._connect(immediate=True) as db:
+                entry = self._load_entry(db, entry_id)
+                if entry is None or entry["kind"] != "milestone" or not entry.get("task"):
+                    return None
+                items = [item for item in entry["task"]["items"] if item["active"]]
+                checked_ids = sorted(item["id"] for item in items if item["checked"])
+                total = len(items)
+                last_changed = db.execute(
+                    "SELECT checked_item_ids, total_count FROM task_checkins WHERE entry_id=? AND changed=1 ORDER BY id DESC LIMIT 1",
+                    (entry_id,),
+                ).fetchone()
+                if last_changed is None:
+                    changed = True
+                else:
+                    previous = set(json.loads(last_changed["checked_item_ids"] or "[]"))
+                    changed = set(checked_ids) != previous or total != last_changed["total_count"]
+                cursor = db.execute(
+                    "INSERT INTO task_checkins(entry_id, occurred_at, checked_count, total_count, changed, checked_item_ids) VALUES (?, ?, ?, ?, ?, ?)",
+                    (entry_id, occurred_at, len(checked_ids), total, 1 if changed else 0, json.dumps(checked_ids)),
+                )
+                db.execute("UPDATE trackers SET updated_at=? WHERE id=?", (now, entry["tracker_id"]))
+                checkin_id = cursor.lastrowid
+        except sqlite3.IntegrityError:
+            return None
         return {
             "id": checkin_id, "entry_id": entry_id, "occurred_at": occurred_at,
             "checked_count": len(checked_ids), "total_count": total,
             "changed": changed, "checked_item_ids": checked_ids,
         }
+
+    def update_task_item_checked(self, entry_id, item_id, checked):
+        try:
+            with self._connect(immediate=True) as db:
+                row = db.execute(
+                    "SELECT task_items.id, entries.tracker_id FROM task_items "
+                    "JOIN entries ON entries.id = task_items.entry_id "
+                    "WHERE task_items.id=? AND task_items.entry_id=? AND task_items.active=1",
+                    (item_id, entry_id),
+                ).fetchone()
+                if row is None:
+                    return None
+                db.execute("UPDATE task_items SET checked=? WHERE id=?", (1 if checked else 0, item_id))
+                db.execute("UPDATE trackers SET updated_at=? WHERE id=?", (self._now(), row["tracker_id"]))
+        except sqlite3.IntegrityError:
+            return None
+        return self.get_entry(entry_id)
 
     def delete_entry(self, entry_id):
         existing = self.get_entry(entry_id)

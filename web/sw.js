@@ -1,5 +1,5 @@
 // App-shell cache for read-only offline use. Bump CACHE to force a shell refresh.
-const CACHE = "long-time-shell-v5";
+const CACHE = "long-time-shell-v7";
 const SHELL = ["/", "/app.css", "/logic.js", "/app.js", "/vendor/alpine-3.14.9.min.js"];
 
 self.addEventListener("install", (event) => {
@@ -31,18 +31,13 @@ self.addEventListener("fetch", (event) => {
 	event.respondWith(
 		caches.open(CACHE).then(async (cache) => {
 			const cached = await cache.match(request);
-			const network = fetch(request)
-				.then((response) => {
-					if (response?.ok) cache.put(request, response.clone());
-					return response;
-				})
-				.catch(() => null);
-			// Stale-while-revalidate: serve cache immediately, refresh in the background.
-			const response = cached || (await network);
-			if (response) return response;
-			// Offline navigation with no exact match: fall back to the cached shell.
-			if (request.mode === "navigate") return cache.match("/");
-			return Response.error();
+			if (cached) return cached;
+			try {
+				return await fetch(request);
+			} catch (_error) {
+				if (request.mode === "navigate") return cache.match("/");
+				return Response.error();
+			}
 		}),
 	);
 });

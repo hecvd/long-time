@@ -48,24 +48,16 @@ test("sortTrackers returns a copy in requested order", () => {
 	assert.notEqual(sorted, trackers);
 });
 
-test("milestone dates resolve calendar years and duration units", () => {
+test("milestone dates use the server-resolved timestamp", () => {
 	const tracker = { started_at: "2024-02-29T10:15:00Z" };
-	const annual = {
-		target_mode: "duration",
-		target_value: 1,
-		target_unit: "years",
-	};
+	const annual = { resolved_target_at: "2025-02-28T10:15:00.000Z" };
 	assert.equal(logic.resolvedMilestoneTarget(tracker, annual).toISOString(), "2025-02-28T10:15:00.000Z");
 	assert.equal(logic.milestoneState(tracker, annual, new Date("2025-01-01T00:00:00Z")).future, true);
 });
 
 test("calendar month milestones clamp to the destination month end", () => {
 	const tracker = { started_at: "2024-01-31T10:15:00Z" };
-	const monthly = {
-		target_mode: "duration",
-		target_value: 1,
-		target_unit: "months",
-	};
+	const monthly = { resolved_target_at: "2024-02-29T10:15:00.000Z" };
 	assert.equal(logic.resolvedMilestoneTarget(tracker, monthly).toISOString(), "2024-02-29T10:15:00.000Z");
 });
 
@@ -120,9 +112,7 @@ test("orderedEntries uses resolved timestamps newest first", () => {
 			{
 				id: 2,
 				kind: "milestone",
-				target_mode: "duration",
-				target_value: 2,
-				target_unit: "weeks",
+				resolved_target_at: "2024-01-15T00:00:00Z",
 			},
 		],
 	};
@@ -143,9 +133,7 @@ test("entryTimingLabel describes notes and milestones", () => {
 	);
 	const milestone = {
 		kind: "milestone",
-		target_mode: "duration",
-		target_value: 2,
-		target_unit: "weeks",
+		resolved_target_at: "2024-01-15T00:00:00Z",
 	};
 	assert.equal(logic.entryTimingLabel(tracker, milestone, new Date("2024-01-01T00:00:00Z")), "2 weeks remaining");
 	assert.equal(logic.entryTimingLabel(tracker, milestone, new Date("2024-01-28T00:00:00Z")), "13 days ago");
@@ -154,7 +142,7 @@ test("entryTimingLabel describes notes and milestones", () => {
 test("tracker page uses adaptive time and omits the introductory copy", () => {
 	const html = fs.readFileSync(path.join(__dirname, "..", "web", "index.html"), "utf8");
 	assert.match(html, /formattedClosestDuration\(tracker\)/);
-	assert.match(html, /value="months">Calendar months/);
+	assert.match(html, /x-for="unit in durationUnits"/);
 	assert.doesNotMatch(html, /A quiet living ledger|Time, made visible|trackerCountLabel|class="intro"/);
 });
 
@@ -177,9 +165,10 @@ test("cached trackers round-trip and degrade to empty", () => {
 
 test("offline shell and data cache are wired", () => {
 	const sw = fs.readFileSync(path.join(__dirname, "..", "web", "sw.js"), "utf8");
-	assert.match(sw, /const CACHE = "long-time-shell-v5"/);
+	assert.match(sw, /const CACHE = "long-time-shell-v7"/);
 	assert.match(sw, /"\/app\.js"/);
 	assert.match(sw, /startsWith\("\/api\/"\)/);
+	assert.doesNotMatch(sw, /cache\.put/);
 
 	const app = fs.readFileSync(path.join(__dirname, "..", "web", "app.js"), "utf8");
 	assert.match(app, /navigator\.serviceWorker\.register\("\/sw\.js"\)/);
@@ -208,20 +197,26 @@ test("rail marks cleared milestones distinctly", () => {
 	assert.match(css, /\.rail li\.cleared \.rail-marker/);
 });
 
-test("resolvedMilestoneTarget treats four_weeks as 28 days", () => {
+test("resolvedMilestoneTarget prefers the server-resolved timestamp", () => {
 	const tracker = { started_at: "2024-01-01T00:00:00Z" };
 	const target = logic.resolvedMilestoneTarget(tracker, {
 		target_mode: "duration",
 		target_value: 1.5,
 		target_unit: "four_weeks",
+		resolved_target_at: "2024-02-12T00:00:00.000Z",
 	});
 	assert.equal(target.toISOString(), "2024-02-12T00:00:00.000Z");
 });
 
-test("duration form offers a four-week month and allows whole calendar months", () => {
+test("duration form options come from the unit catalog", () => {
 	const html = fs.readFileSync(path.join(__dirname, "..", "web", "index.html"), "utf8");
-	assert.match(html, /<option value="four_weeks">Months \(4 weeks\)<\/option>/);
-	assert.match(html, /:min="\['months', 'years'\]\.includes\(entryForm\.target_unit\) \? 1 : 0\.01"/);
+	assert.match(html, /x-for="unit in durationUnits"/);
+	assert.match(html, /durationUnit\(entryForm\.target_unit\)\.whole_only/);
+	assert.match(html, /x-for="unit in taskPeriodUnits"/);
+	const app = fs.readFileSync(path.join(__dirname, "..", "web", "app.js"), "utf8");
+	assert.match(app, /\/api\/meta/);
+	assert.doesNotMatch(app, /taskPendingPayload/);
+	assert.match(app, /\/task-items\//);
 });
 
 test("tracker page exposes an inline quick-note form", () => {
@@ -428,4 +423,8 @@ test("check-in card and checklist editor are wired", () => {
 	assert.doesNotMatch(app, /kind === "milestone" \? \[newTaskItem\(\)\]/);
 	assert.match(app, /checkinHistory\(entry\)/);
 	assert.doesNotMatch(app, /changedCheckins\(entry\)/);
+	assert.match(app, /timestampFromInput/);
+	assert.match(app, /kind === "clear-task"/);
+	assert.match(app, /method !== "GET"/);
+	assert.match(html, /Clear the checklist/);
 });

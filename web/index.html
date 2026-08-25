@@ -565,8 +565,9 @@
                   <label
                     ><span>per</span
                     ><select x-model="entryForm.period_unit">
-                      <option value="day">day</option>
-                      <option value="week">week</option>
+                      <template x-for="unit in taskPeriodUnits" :key="unit.id">
+                        <option :value="unit.id" x-text="unit.label"></option>
+                      </template>
                     </select><small
                       class="field-error"
                       x-show="entryErrors['task.period_unit']"
@@ -619,23 +620,20 @@
                   ><span>Duration</span
                   ><input
                     type="number"
-                    :min="['months', 'years'].includes(entryForm.target_unit) ? 1 : 0.01"
+                    :min="durationUnit(entryForm.target_unit).whole_only ? 1 : 0.01"
                     max="1000000"
-                    :step="['months', 'years'].includes(entryForm.target_unit) ? 1 : 'any'"
+                    :step="durationUnit(entryForm.target_unit).whole_only ? 1 : 'any'"
                     x-model="entryForm.target_value" /><small
-                    class="field-error"
-                    x-show="entryErrors.target_value"
-                    x-text="entryErrors.target_value"
-                  ></small></label
+                  class="field-error"
+                  x-show="entryErrors.target_value"
+                  x-text="entryErrors.target_value"
+                ></small></label
                 ><label
                   ><span>Unit</span
                   ><select x-model="entryForm.target_unit">
-                    <option value="hours">Hours</option>
-                    <option value="days">Days</option>
-                    <option value="weeks">Weeks</option>
-                    <option value="four_weeks">Months (4 weeks)</option>
-                    <option value="months">Calendar months</option>
-                    <option value="years">Calendar years</option></select
+                    <template x-for="unit in durationUnits" :key="unit.id">
+                      <option :value="unit.id" x-text="unit.label"></option>
+                    </template></select
                   ><small
                     class="field-error"
                     x-show="entryErrors.target_unit"
@@ -675,25 +673,40 @@
       @cancel.prevent="closeConfirmation()"
     >
       <div class="dialog-form">
-        <p class="eyebrow">Permanent action</p>
-        <h2 id="confirm-title">Delete this item?</h2>
-        <p>
+        <p class="eyebrow" x-text="confirmation?.kind === 'clear-task' ? 'Checklist' : 'Permanent action'"></p>
+        <h2
+          id="confirm-title"
+          x-text="confirmation?.kind === 'clear-task' ? 'Clear the checklist?' : 'Delete this item?'"
+        ></h2>
+        <p x-show="confirmation?.kind !== 'clear-task'">
           “<span x-text="confirmation?.name"></span>” and any dependent records
           will be removed.
+        </p>
+        <p x-show="confirmation?.kind === 'clear-task'">
+          Check-in history for this milestone will be removed.
         </p>
         <div class="dialog-actions">
           <button
             type="button"
             @click="closeConfirmation()"
-            :disabled="deleting"
+            :disabled="deleting || savingEntry"
           >
             Keep it</button
           ><button
             class="danger-button"
             type="button"
+            x-show="confirmation?.kind !== 'clear-task'"
             @click="confirmDelete()"
             :disabled="deleting"
             x-text="deleting ? 'Deleting…' : 'Delete permanently'"
+          ></button
+          ><button
+            class="danger-button"
+            type="button"
+            x-show="confirmation?.kind === 'clear-task'"
+            @click="confirmClearTask()"
+            :disabled="savingEntry"
+            x-text="savingEntry ? 'Saving…' : 'Clear checklist'"
           ></button>
         </div>
       </div>

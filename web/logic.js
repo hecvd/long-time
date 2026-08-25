@@ -6,6 +6,7 @@
 	const DAY_MS = 86_400_000;
 	const YEAR_DAYS = 365.2425;
 	const DATA_CACHE_KEY = "long-time:data";
+	const META_CACHE_KEY = "long-time:meta";
 
 	function readCachedTrackers(storage) {
 		try {
@@ -19,6 +20,24 @@
 	function writeCachedTrackers(storage, trackers) {
 		try {
 			storage.setItem(DATA_CACHE_KEY, JSON.stringify(trackers));
+		} catch (_error) {
+			/* ignore quota / unavailable storage */
+		}
+	}
+
+	function readCachedMeta(storage) {
+		try {
+			const parsed = JSON.parse(storage.getItem(META_CACHE_KEY));
+			if (parsed && Array.isArray(parsed.duration_units) && Array.isArray(parsed.task_period_units)) return parsed;
+		} catch (_error) {
+			/* ignore */
+		}
+		return { duration_units: [], task_period_units: [] };
+	}
+
+	function writeCachedMeta(storage, meta) {
+		try {
+			storage.setItem(META_CACHE_KEY, JSON.stringify(meta));
 		} catch (_error) {
 			/* ignore quota / unavailable storage */
 		}
@@ -119,19 +138,9 @@
 	}
 
 	function resolvedMilestoneTarget(tracker, entry) {
+		if (entry.resolved_target_at) return new Date(entry.resolved_target_at);
 		if (entry.target_mode === "date") return new Date(entry.target_at);
-		if (entry.target_mode === "none") return new Date(tracker.started_at);
-		const start = new Date(tracker.started_at);
-		const value = Number(entry.target_value);
-		if (entry.target_unit === "years") return addCalendarYears(start, value);
-		if (entry.target_unit === "months") return addCalendarMonths(start, value);
-		const multipliers = {
-			hours: 3_600_000,
-			days: DAY_MS,
-			weeks: 7 * DAY_MS,
-			four_weeks: 28 * DAY_MS,
-		};
-		return new Date(start.getTime() + value * multipliers[entry.target_unit]);
+		return new Date(tracker.started_at);
 	}
 
 	function milestoneState(tracker, entry, now = new Date()) {
@@ -257,6 +266,8 @@
 		safePreference,
 		readCachedTrackers,
 		writeCachedTrackers,
+		readCachedMeta,
+		writeCachedMeta,
 		periodOrdinal,
 		taskStats,
 		trackerTaskStats,

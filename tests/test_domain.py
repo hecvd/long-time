@@ -3,8 +3,10 @@ import unittest
 from domain import (
     ValidationError,
     resolve_milestone_target,
+    unit_catalog,
     validate_entry,
     validate_import,
+    validate_task_item_checked,
     validate_tracker,
 )
 
@@ -177,3 +179,107 @@ class DomainTestCase(unittest.TestCase):
             "task": {"per_period": 2, "period_unit": "week", "items": [{"label": "x"}]}})
         self.assertEqual(result["target_unit"], "years")
         self.assertEqual(result["task"]["period_unit"], "week")
+
+    def test_validate_import_accepts_cumulative_items_over_the_interactive_cap(self):
+        items = [{"label": f"a{i}", "active": True} for i in range(60)]
+        items.extend({"label": f"r{i}", "active": False} for i in range(41))
+        _, trackers = validate_import({
+            "mode": "replace",
+            "trackers": [{
+                "title": "Piano", "description": "", "started_at": "2024-01-01T00:00:00Z",
+                "entries": [{
+                    "kind": "milestone", "title": "M", "body": "", "target_mode": "none",
+                    "task": {"per_period": 2000, "period_unit": "fortnight", "items": items},
+                }],
+            }],
+        })
+        task = trackers[0]["entries"][0]["task"]
+        self.assertEqual(len(task["items"]), 101)
+        self.assertEqual(sum(1 for item in task["items"] if item["active"]), 60)
+        self.assertEqual(task["per_period"], 2000)
+        self.assertEqual(task["period_unit"], "day")
+
+    def test_validate_import_skips_out_of_range_checkin_numbers(self):
+        _, trackers = validate_import({
+            "mode": "replace",
+            "trackers": [{
+                "title": "Piano", "description": "", "started_at": "2024-01-01T00:00:00Z",
+                "entries": [{
+                    "kind": "milestone", "title": "M", "body": "", "target_mode": "none",
+                    "task": {
+                        "per_period": 1, "period_unit": "day",
+                        "items": [{"label": "A"}],
+                        "checkins": [
+                            {"occurred_at": 10**20, "checked_count": 1, "total_count": 1, "changed": True},
+                            {"occurred_at": 2, "checked_count": 1, "total_count": 1, "changed": True, "checked_item_ids": [1]},
+                            {"occurred_at": 3, "checked_count": 100_001, "total_count": 1, "changed": True},
+                        ],
+                    },
+                }],
+            }],
+        })
+        checkins = trackers[0]["entries"][0]["task"]["checkins"]
+        self.assertEqual(len(checkins), 1)
+        self.assertEqual(checkins[0]["occurred_at"], 2)
+
+    def test_validate_import_downgrades_changed_checkins_without_snapshots(self):
+        _, trackers = validate_import({
+            "mode": "replace",
+            "trackers": [{
+                "title": "Piano", "description": "", "started_at": "2024-01-01T00:00:00Z",
+                "entries": [{
+                    "kind": "milestone", "title": "M", "body": "", "target_mode": "none",
+                    "task": {
+                        "per_period": 1, "period_unit": "day",
+                        "items": [{"label": "A"}],
+                        "checkins": [
+                            {"occurred_at": 1, "checked_count": 0, "total_count": 1, "changed": True, "checked_item_ids": None},
+                        ],
+                    },
+                }],
+            }],
+        })
+        checkin = trackers[0]["entries"][0]["task"]["checkins"][0]
+        self.assertFalse(checkin["changed"])
+
+    def test_validate_entry_omits_task_when_the_key_is_absent(self):
+        result = validate_entry({
+            "kind": "milestone", "title": "Rename", "body": "",
+            "target_mode": "duration", "target_value": 1, "target_unit": "years",
+        })
+        self.assertNotIn("task", result)
+
+    def test_updating_task_only_milestone_may_omit_task(self):
+        result = validate_entry({
+            "kind": "milestone", "title": "Rename", "body": "", "target_mode": "none",
+        }, updating=True)
+        self.assertNotIn("task", result)
+        self.assertEqual(result["target_mode"], "none")
+
+    def test_task_only_milestone_resolves_to_tracker_start(self):
+        target = resolve_milestone_target("2024-01-01T10:00:00Z", {"target_mode": "none"})
+        self.assertEqual(target, "2024-01-01T10:00:00Z")
+
+    def test_calendar_years_out_of_range_are_rejected(self):
+        with self.assertRaises(ValidationError) as raised:
+            resolve_milestone_target(
+                "9999-01-01T00:00:00Z",
+                {"target_mode": "duration", "target_value": 1, "target_unit": "years"},
+            )
+        self.assertIn("target_value", raised.exception.fields)
+
+    def test_unit_catalog_lists_duration_and_task_period_units(self):
+        catalog = unit_catalog()
+        duration_ids = [unit["id"] for unit in catalog["duration_units"]]
+        self.assertEqual(duration_ids, ["hours", "days", "weeks", "four_weeks", "months", "years"])
+        months = next(unit for unit in catalog["duration_units"] if unit["id"] == "months")
+        self.assertTrue(months["whole_only"])
+        self.assertEqual(months["kind"], "calendar")
+        self.assertEqual([unit["id"] for unit in catalog["task_period_units"]], ["day", "week"])
+
+    def test_validate_task_item_checked_requires_a_boolean(self):
+        self.assertTrue(validate_task_item_checked({"checked": True}))
+        self.assertFalse(validate_task_item_checked({"checked": False}))
+        with self.assertRaises(ValidationError) as raised:
+            validate_task_item_checked({"checked": 1})
+        self.assertIn("checked", raised.exception.fields)

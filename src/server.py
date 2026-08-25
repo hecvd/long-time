@@ -3,27 +3,26 @@ from __future__ import annotations
 import argparse
 import json
 import logging
-import mimetypes
-import re
-from http import HTTPStatus
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import unquote, urlsplit
+
+import uvicorn
+from fastapi import FastAPI, Request, Response
+from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from domain import (  # pyright: ignore[reportMissingImports]
     ValidationError,
+    unit_catalog,
     validate_entry,
     validate_import,
+    validate_task_item_checked,
     validate_tracker,
 )
 from storage import Storage  # pyright: ignore[reportMissingImports]
 
 MAX_BODY = 65_536
 MAX_IMPORT_BODY = 8_388_608
-TRACKER_PATH = re.compile(r"^/api/trackers/(\d+)$")
-TRACKER_ENTRIES_PATH = re.compile(r"^/api/trackers/(\d+)/entries$")
-ENTRY_PATH = re.compile(r"^/api/entries/(\d+)$")
-CHECKIN_PATH = re.compile(r"^/api/entries/(\d+)/checkins$")
 
 
 class ApiError(Exception):
@@ -35,173 +34,179 @@ class ApiError(Exception):
         self.field_errors = field_errors
 
 
-def create_handler(storage: Storage, static_dir: Path):
-    static_root = static_dir.resolve()
-
-    class LongTimeHandler(BaseHTTPRequestHandler):
-        def log_message(self, format, *args):
-            logging.info("%s - %s", self.address_string(), format % args)
-
-        def send_json(self, status, payload):
-            body = json.dumps(payload, separators=(",", ":")).encode("utf-8")
-            self.send_response(status)
-            self.send_header("Content-Type", "application/json; charset=utf-8")
-            self.send_header("Content-Length", str(len(body)))
-            self.send_header("Cache-Control", "no-store")
-            self.end_headers()
-            self.wfile.write(body)
-
-        def send_export(self):
-            data = storage.export()
-            body = json.dumps(data, separators=(",", ":")).encode("utf-8")
-            filename = f"long-time-{data['exported_at'][:10]}.json"
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json; charset=utf-8")
-            self.send_header("Content-Disposition", f'attachment; filename="{filename}"')
-            self.send_header("Content-Length", str(len(body)))
-            self.send_header("Cache-Control", "no-store")
-            self.end_headers()
-            self.wfile.write(body)
-
-        def send_api_error(self, status, code, message, field_errors=None):
-            error = {"code": code, "message": message}
-            if field_errors:
-                error["field_errors"] = field_errors
-            self.send_json(status, {"error": error})
-
-        def read_json(self, max_bytes=MAX_BODY):
-            try:
-                length = int(self.headers.get("Content-Length", "0"))
-            except ValueError as error:
-                raise ApiError(400, "invalid_request", "Invalid request body.") from error
-            if length > max_bytes:
-                raise ApiError(413, "request_too_large", "The request body is too large.")
-            try:
-                payload = json.loads(self.rfile.read(length).decode("utf-8"))
-            except (UnicodeDecodeError, json.JSONDecodeError) as error:
-                raise ApiError(400, "invalid_json", "The request body must be valid JSON.") from error
-            if not isinstance(payload, dict):
-                raise ApiError(400, "invalid_json", "The request body must be a JSON object.")
-            return payload
-
-        def do_GET(self):
-            path = urlsplit(self.path).path
-            if path == "/api/trackers":
-                self.send_json(200, storage.list_trackers())
-                return
-            if path == "/api/export":
-                self.send_export()
-                return
-            if path.startswith("/api"):
-                self.send_api_error(404, "not_found", "That resource does not exist.")
-                return
-            self.serve_static(path)
-
-        def do_POST(self):
-            self.handle_mutation("POST")
-
-        def do_PUT(self):
-            self.handle_mutation("PUT")
-
-        def do_DELETE(self):
-            self.handle_mutation("DELETE")
-
-        def do_PATCH(self):
-            self.send_api_error(405, "method_not_allowed", "That method is not supported.")
-
-        def handle_mutation(self, method):
-            path = urlsplit(self.path).path
-            try:
-                if method == "POST" and path == "/api/trackers":
-                    self.send_json(201, storage.create_tracker(validate_tracker(self.read_json())))
-                    return
-                if method == "POST" and path == "/api/import":
-                    mode, trackers = validate_import(self.read_json(MAX_IMPORT_BODY))
-                    self.send_json(200, storage.import_data(trackers, mode))
-                    return
-                tracker_match = TRACKER_PATH.fullmatch(path)
-                if tracker_match and method in {"PUT", "DELETE"}:
-                    tracker_id = int(tracker_match.group(1))
-                    if method == "PUT":
-                        record = storage.update_tracker(tracker_id, validate_tracker(self.read_json()))
-                        self._record_or_404(record)
-                    else:
-                        self._delete_or_404(storage.delete_tracker(tracker_id))
-                    return
-                nested_match = TRACKER_ENTRIES_PATH.fullmatch(path)
-                if nested_match and method == "POST":
-                    record = storage.create_entry(int(nested_match.group(1)), validate_entry(self.read_json()))
-                    if record is None:
-                        raise ApiError(404, "not_found", "That tracker does not exist.")
-                    self.send_json(201, record)
-                    return
-                checkin_match = CHECKIN_PATH.fullmatch(path)
-                if checkin_match and method == "POST":
-                    checkin = storage.create_checkin(int(checkin_match.group(1)))
-                    if checkin is None:
-                        raise ApiError(404, "not_found", "That resource does not exist.")
-                    self.send_json(201, checkin)
-                    return
-                entry_match = ENTRY_PATH.fullmatch(path)
-                if entry_match and method in {"PUT", "DELETE"}:
-                    entry_id = int(entry_match.group(1))
-                    if method == "PUT":
-                        self._record_or_404(storage.update_entry(entry_id, validate_entry(self.read_json())))
-                    else:
-                        self._delete_or_404(storage.delete_entry(entry_id))
-                    return
-                raise ApiError(405, "method_not_allowed", "That method is not supported.")
-            except ValidationError as error:
-                self.send_api_error(400, "validation_error", "Check the highlighted fields.", error.fields)
-            except ApiError as error:
-                self.send_api_error(error.status, error.code, error.message, error.field_errors)
-            except Exception:
-                logging.exception("API request failed")
-                self.send_api_error(500, "server_error", "The server could not complete that request.")
-
-        def _record_or_404(self, record):
-            if record is None:
-                raise ApiError(404, "not_found", "That resource does not exist.")
-            self.send_json(200, record)
-
-        def _delete_or_404(self, deleted):
-            if not deleted:
-                raise ApiError(404, "not_found", "That resource does not exist.")
-            self.send_response(204)
-            self.send_header("Cache-Control", "no-store")
-            self.end_headers()
-
-        def serve_static(self, path):
-            relative = "index.html" if path == "/" else unquote(path).lstrip("/")
-            candidate = (static_root / relative).resolve()
-            if (static_root not in candidate.parents and candidate != static_root) or not candidate.is_file():
-                self.send_error(HTTPStatus.NOT_FOUND)
-                return
-            stat = candidate.stat()
-            etag = f'"{stat.st_mtime_ns:x}-{stat.st_size:x}"'
-            if self.headers.get("If-None-Match") == etag:
-                self.send_response(HTTPStatus.NOT_MODIFIED)
-                self.send_header("ETag", etag)
-                self.send_header("Cache-Control", "no-cache")
-                self.end_headers()
-                return
-            body = candidate.read_bytes()
-            content_type = mimetypes.guess_type(candidate.name)[0] or "application/octet-stream"
-            self.send_response(HTTPStatus.OK)
-            self.send_header("Content-Type", f"{content_type}; charset=utf-8")
-            self.send_header("Content-Length", str(len(body)))
-            self.send_header("ETag", etag)
-            self.send_header("Cache-Control", "no-cache")
-            self.end_headers()
-            self.wfile.write(body)
-
-    return LongTimeHandler
+def json_content_type(value):
+    return (value or "").split(";", 1)[0].strip().lower() == "application/json"
 
 
-def create_server(host: str, port: int, db_path: Path, static_dir: Path):
+def error_payload(code, message, field_errors=None):
+    error = {"code": code, "message": message}
+    if field_errors:
+        error["field_errors"] = field_errors
+    return {"error": error}
+
+
+def send_json(status, payload):
+    return JSONResponse(payload, status_code=status, headers={"Cache-Control": "no-store"})
+
+
+class WebStaticFiles(StaticFiles):
+    async def get_response(self, path, scope):
+        try:
+            response = await super().get_response(path, scope)
+        except (ValueError, OSError) as error:
+            raise StarletteHTTPException(404) from error
+        response.headers["Cache-Control"] = "no-cache"
+        return response
+
+
+async def read_json(request: Request) -> dict:
+    try:
+        payload = json.loads((await request.body()).decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise ApiError(400, "invalid_json", "The request body must be valid JSON.") from error
+    if not isinstance(payload, dict):
+        raise ApiError(400, "invalid_json", "The request body must be a JSON object.")
+    return payload
+
+
+def record_or_404(record):
+    if record is None:
+        raise ApiError(404, "not_found", "That resource does not exist.")
+    return send_json(200, record)
+
+
+def create_app(db_path: Path, static_dir: Path) -> FastAPI:
     storage = Storage(db_path)
     storage.initialize()
-    return ThreadingHTTPServer((host, port), create_handler(storage, static_dir))
+    static_root = Path(static_dir).resolve()
+    app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
+
+    @app.exception_handler(ApiError)
+    async def api_error_handler(_request, error: ApiError):
+        return send_json(error.status, error_payload(error.code, error.message, error.field_errors))
+
+    @app.exception_handler(ValidationError)
+    async def validation_handler(_request, error: ValidationError):
+        return send_json(400, error_payload("validation_error", "Check the highlighted fields.", error.fields))
+
+    @app.exception_handler(StarletteHTTPException)
+    async def http_exception_handler(request: Request, error: StarletteHTTPException):
+        if request.url.path.startswith("/api/") or error.status_code == 405:
+            code = "method_not_allowed" if error.status_code == 405 else "not_found"
+            message = (
+                "That method is not supported."
+                if error.status_code == 405
+                else "That resource does not exist."
+            )
+            return send_json(error.status_code, error_payload(code, message))
+        return Response(status_code=error.status_code)
+
+    @app.exception_handler(Exception)
+    async def unhandled_handler(request: Request, _error):
+        logging.exception("API request failed")
+        if request.url.path.startswith("/api/"):
+            return send_json(500, error_payload("server_error", "The server could not complete that request."))
+        return Response(status_code=500)
+
+    @app.middleware("http")
+    async def harden_api(request: Request, call_next):
+        if request.url.path.startswith("/api/") and request.method in {"POST", "PUT", "DELETE"}:
+            if not json_content_type(request.headers.get("content-type")):
+                return send_json(
+                    415,
+                    error_payload("unsupported_media_type", "Use Content-Type: application/json."),
+                )
+            limit = MAX_IMPORT_BODY if request.url.path == "/api/import" else MAX_BODY
+            if len(await request.body()) > limit:
+                return send_json(413, error_payload("request_too_large", "The request body is too large."))
+        try:
+            return await call_next(request)
+        except (ValueError, OSError):
+            if request.url.path.startswith("/api/"):
+                return send_json(404, error_payload("not_found", "That resource does not exist."))
+            raise StarletteHTTPException(404)
+
+    @app.get("/api/trackers")
+    def list_trackers():
+        return send_json(200, storage.list_trackers())
+
+    @app.get("/api/meta")
+    def meta():
+        return send_json(200, unit_catalog())
+
+    @app.get("/api/export")
+    def export():
+        data = storage.export()
+        body = json.dumps(data, separators=(",", ":")).encode("utf-8")
+        filename = f"long-time-{data['exported_at'][:10]}.json"
+        return Response(
+            content=body,
+            media_type="application/json; charset=utf-8",
+            headers={
+                "Content-Disposition": f'attachment; filename="{filename}"',
+                "Cache-Control": "no-store",
+            },
+        )
+
+    @app.post("/api/trackers")
+    async def create_tracker(request: Request):
+        return send_json(201, storage.create_tracker(validate_tracker(await read_json(request))))
+
+    @app.put("/api/trackers/{tracker_id}")
+    async def update_tracker(tracker_id: int, request: Request):
+        return record_or_404(storage.update_tracker(tracker_id, validate_tracker(await read_json(request))))
+
+    @app.delete("/api/trackers/{tracker_id}")
+    def delete_tracker(tracker_id: int):
+        if not storage.delete_tracker(tracker_id):
+            raise ApiError(404, "not_found", "That resource does not exist.")
+        return Response(status_code=204, headers={"Cache-Control": "no-store"})
+
+    @app.post("/api/trackers/{tracker_id}/entries")
+    async def create_entry(tracker_id: int, request: Request):
+        record = storage.create_entry(tracker_id, validate_entry(await read_json(request)))
+        if record is None:
+            raise ApiError(404, "not_found", "That tracker does not exist.")
+        return send_json(201, record)
+
+    @app.put("/api/entries/{entry_id}")
+    async def update_entry(entry_id: int, request: Request):
+        return record_or_404(
+            storage.update_entry(entry_id, validate_entry(await read_json(request), updating=True))
+        )
+
+    @app.delete("/api/entries/{entry_id}")
+    def delete_entry(entry_id: int):
+        if not storage.delete_entry(entry_id):
+            raise ApiError(404, "not_found", "That resource does not exist.")
+        return Response(status_code=204, headers={"Cache-Control": "no-store"})
+
+    @app.post("/api/entries/{entry_id}/checkins")
+    def create_checkin(entry_id: int):
+        checkin = storage.create_checkin(entry_id)
+        if checkin is None:
+            raise ApiError(404, "not_found", "That resource does not exist.")
+        return send_json(201, checkin)
+
+    @app.put("/api/entries/{entry_id}/task-items/{item_id}")
+    async def toggle_task_item(entry_id: int, item_id: int, request: Request):
+        return record_or_404(
+            storage.update_task_item_checked(
+                entry_id, item_id, validate_task_item_checked(await read_json(request))
+            )
+        )
+
+    @app.post("/api/import")
+    async def import_data(request: Request):
+        mode, trackers = validate_import(await read_json(request))
+        return send_json(200, storage.import_data(trackers, mode))
+
+    @app.api_route("/api/{full_path:path}", methods=["GET", "POST", "PUT", "DELETE"])
+    def api_unknown(full_path: str):
+        raise ApiError(404, "not_found", "That resource does not exist.")
+
+    app.mount("/", WebStaticFiles(directory=str(static_root), html=True), name="web")
+    return app
 
 
 def main():
@@ -216,14 +221,9 @@ def main():
         format="%(asctime)s %(levelname)s %(message)s",
         datefmt="%Y-%m-%dT%H:%M:%S%z",
     )
-    server = create_server(args.host, args.port, args.database, args.web_root)
-    logging.info("Long Time listening on http://%s:%s", args.host, server.server_port)
-    try:
-        server.serve_forever()
-    except KeyboardInterrupt:
-        pass
-    finally:
-        server.server_close()
+    app = create_app(args.database, args.web_root)
+    logging.info("Long Time listening on http://%s:%s", args.host, args.port)
+    uvicorn.run(app, host=args.host, port=args.port, timeout_keep_alive=30)
 
 
 if __name__ == "__main__":
