@@ -128,7 +128,8 @@
               x-show="expandedId === tracker.id"
               :id="`tracker-detail-${tracker.id}`"
             >
-              <div class="measurements" aria-label="Elapsed measurements">
+              <div class="measurement-stack">
+                <div class="measurements" aria-label="Elapsed measurements">
                 <div>
                   <strong x-text="elapsed(tracker).hours"></strong
                   ><span>hours</span>
@@ -145,6 +146,25 @@
                   <strong x-text="elapsed(tracker).years"></strong
                   ><span>years</span>
                 </div>
+              </div>
+              <div
+                class="measurements task-measurements"
+                aria-label="Task measurements"
+                x-show="trackerTaskStats(tracker).tasks"
+              >
+                <div>
+                  <strong x-text="trackerTaskStats(tracker).tasks"></strong
+                  ><span>tasks</span>
+                </div>
+                <div>
+                  <strong x-text="trackerTaskStats(tracker).checkins"></strong
+                  ><span>check-ins</span>
+                </div>
+                <div>
+                  <strong x-text="trackerTaskStats(tracker).currentStreak"></strong
+                  ><span>streak</span>
+                </div>
+              </div>
               </div>
               <div class="tracker-meta">
                 <p>
@@ -167,52 +187,145 @@
                   </button>
                 </div>
               </div>
-              <div class="entry-heading">
-                <div>
-                  <p class="eyebrow">Chronological rail</p>
-                  <h3>Notes & milestones</h3>
+              <section class="tracker-section">
+                <div class="entry-heading">
+                  <div>
+                    <p class="eyebrow">Checklists</p>
+                    <h3>Tasks</h3>
+                  </div>
+                  <div class="inline-actions">
+                    <button
+                      class="primary-button small"
+                      type="button"
+                      @click="openNewMilestone(tracker)"
+                    >
+                      Add milestone
+                    </button>
+                  </div>
                 </div>
-                <div class="inline-actions">
-                  <button type="button" @click="openNewNote(tracker)">
-                    Add note
-                  </button>
+                <div class="task-list" x-show="taskEntries(tracker).length">
+                  <template
+                    x-for="entry in taskEntries(tracker)"
+                    :key="'task-' + entry.id"
+                  >
+                    <div class="check-in-card">
+                  <div class="check-in-head">
+                    <h4 x-text="entry.title"></h4>
+                    <div class="entry-actions">
+                      <button
+                        type="button"
+                        @click="openEditEntry(tracker, entry)"
+                        :aria-label="`Edit ${entry.title}`"
+                      >
+                        Edit
+                      </button>
+                      <button
+                        class="danger-link"
+                        type="button"
+                        @click="requestEntryDelete(entry)"
+                        :aria-label="`Delete ${entry.title}`"
+                      >
+                        Delete
+                      </button>
+                    </div>
+                  </div>
+                  <ul class="task-checklist">
+                    <template
+                      x-for="item in entry.task.items.filter(i => i.active)"
+                      :key="item.id"
+                    >
+                      <li>
+                        <label>
+                          <input
+                            type="checkbox"
+                            :checked="item.checked"
+                            @change="toggleTaskItem(entry, item)"
+                            :disabled="checkingInId !== null"
+                          />
+                          <span x-text="item.label"></span>
+                        </label>
+                      </li>
+                    </template>
+                  </ul>
+                  <div class="check-in-foot">
+                    <p class="task-stats" x-text="taskStatsLabel(entry)"></p>
+                    <button
+                      class="primary-button small"
+                      type="button"
+                      @click="checkIn(entry)"
+                      :disabled="checkingInId !== null"
+                      x-text="checkingInId === entry.id ? 'Checking in…' : 'Check in'"
+                    ></button>
+                  </div>
+                  <details
+                    class="task-history"
+                    x-show="entry.task.checkins.some(c => c.changed)"
+                  >
+                    <summary>History</summary>
+                    <ul>
+                      <template
+                        x-for="checkin in changedCheckins(entry)"
+                        :key="checkin.id"
+                      >
+                        <li>
+                          <time
+                            x-text="formatTimestamp(checkin.occurred_at * 1000)"
+                          ></time>
+                          <span
+                            x-text="checkin.checked_count + '/' + checkin.total_count"
+                          ></span>
+                          <span x-text="checkedLabels(entry, checkin)"></span>
+                        </li>
+                      </template>
+                    </ul>
+                  </details>
+                </div>
+              </template>
+                </div>
+                <p class="empty-section" x-show="!taskEntries(tracker).length">
+                  Nothing to check in yet.
+                </p>
+              </section>
+              <section class="tracker-section">
+                <div class="entry-heading">
+                  <div>
+                    <p class="eyebrow">Chronological rail</p>
+                    <h3>Timeline</h3>
+                  </div>
+                  <div class="inline-actions">
+                    <button type="button" @click="openNewNote(tracker)">
+                      Add note
+                    </button>
+                  </div>
+                </div>
+                <form
+                  class="quick-note"
+                  @submit.prevent="addQuickNote(tracker)"
+                >
+                  <input
+                    type="text"
+                    x-model="quickNotes[tracker.id]"
+                    maxlength="120"
+                    placeholder="Add a quick note…"
+                    aria-label="Add a quick note, stamped with the current time"
+                    :disabled="savingQuickNoteId === tracker.id"
+                  />
                   <button
                     class="primary-button small"
-                    type="button"
-                    @click="openNewMilestone(tracker)"
-                  >
-                    Add milestone
-                  </button>
-                </div>
-              </div>
-              <form
-                class="quick-note"
-                @submit.prevent="addQuickNote(tracker)"
-              >
-                <input
-                  type="text"
-                  x-model="quickNotes[tracker.id]"
-                  maxlength="120"
-                  placeholder="Add a quick note…"
-                  aria-label="Add a quick note, stamped with the current time"
-                  :disabled="savingQuickNoteId === tracker.id"
-                />
-                <button
-                  class="primary-button small"
-                  type="submit"
-                  :disabled="savingQuickNoteId === tracker.id || !(quickNotes[tracker.id] || '').trim()"
-                  x-text="savingQuickNoteId === tracker.id ? 'Adding…' : 'Add'"
-                ></button>
-              </form>
-              <p
-                class="field-error"
-                x-show="quickNoteErrors[tracker.id]"
-                x-text="quickNoteErrors[tracker.id]"
-              ></p>
-              <p class="empty-rail" x-show="!tracker.entries.length">
-                No marks on this timeline yet.
-              </p>
-              <ol class="rail" x-show="tracker.entries.length">
+                    type="submit"
+                    :disabled="savingQuickNoteId === tracker.id || !(quickNotes[tracker.id] || '').trim()"
+                    x-text="savingQuickNoteId === tracker.id ? 'Adding…' : 'Add'"
+                  ></button>
+                </form>
+                <p
+                  class="field-error"
+                  x-show="quickNoteErrors[tracker.id]"
+                  x-text="quickNoteErrors[tracker.id]"
+                ></p>
+                <p class="empty-section" x-show="!railEntries(tracker).length">
+                  No marks on this timeline yet.
+                </p>
+                <ol class="rail" x-show="railEntries(tracker).length">
                 <template
                   x-for="entry in orderedEntries(tracker)"
                   :key="entry.id"
@@ -256,6 +369,7 @@
                   </li>
                 </template>
               </ol>
+              </section>
             </div>
           </article>
         </template>
@@ -397,70 +511,130 @@
             ></small></label
         ></template>
         <template x-if="entryForm.kind === 'milestone'">
-          <fieldset>
-            <legend>Target type</legend>
-            <div class="segmented">
-              <label
-                ><input
-                  type="radio"
-                  value="date"
-                  x-model="entryForm.target_mode"
-                /><span>Date</span></label
-              ><label
-                ><input
-                  type="radio"
-                  value="duration"
-                  x-model="entryForm.target_mode"
-                /><span>Elapsed duration</span></label
+          <div class="milestone-fields">
+            <fieldset class="task-editor">
+              <legend>Checklist <em>optional</em></legend>
+              <template x-for="(item, index) in entryForm.task_items" :key="item.key">
+                <div class="task-item-row">
+                  <input
+                    type="text"
+                    maxlength="120"
+                    placeholder="Checklist item"
+                    x-model="item.label"
+                    :aria-label="'Checklist item ' + (index + 1)"
+                  />
+                  <button
+                    type="button"
+                    class="danger-link"
+                    @click="removeTaskItem(index)"
+                    aria-label="Remove item"
+                  >
+                    Remove
+                  </button>
+                  <small
+                    class="field-error"
+                    x-show="entryErrors['task.items[' + index + '].label']"
+                    x-text="entryErrors['task.items[' + index + '].label']"
+                  ></small>
+                </div>
+              </template>
+              <button type="button" @click="addTaskItem()">Add item</button>
+              <div class="cadence-fields" x-show="entryForm.task_items.length">
+                <label
+                  ><span>Check in</span
+                  ><input type="number" min="1" max="1000" x-model="entryForm.per_period"
+                /><small
+                    class="field-error"
+                    x-show="entryErrors['task.per_period']"
+                    x-text="entryErrors['task.per_period']"
+                  ></small></label
+                >
+                <label
+                  ><span>per</span
+                  ><select x-model="entryForm.period_unit">
+                    <option value="day">day</option>
+                    <option value="week">week</option>
+                  </select><small
+                    class="field-error"
+                    x-show="entryErrors['task.period_unit']"
+                    x-text="entryErrors['task.period_unit']"
+                  ></small></label
+                >
+              </div>
+            </fieldset>
+            <label class="deadline-toggle">
+              <input type="checkbox" x-model="entryForm.has_deadline" /><span
+                >Add a deadline</span
               >
-            </div>
-          </fieldset>
-        </template>
-        <template
-          x-if="entryForm.kind === 'milestone' && entryForm.target_mode === 'date'"
-          ><label
-            ><span>Target date and time</span
-            ><input
-              type="datetime-local"
-              required
-              x-model="entryForm.target_at" /><small
+            </label>
+            <template x-if="entryForm.has_deadline">
+              <fieldset>
+                <legend>Target type</legend>
+                <div class="segmented">
+                  <label
+                    ><input type="radio" value="date" x-model="entryForm.target_mode" /><span
+                      >Date</span
+                    ></label
+                  ><label
+                    ><input
+                      type="radio"
+                      value="duration"
+                      x-model="entryForm.target_mode"
+                    /><span>Elapsed duration</span></label
+                  >
+                </div>
+              </fieldset>
+            </template>
+            <template
+              x-if="entryForm.has_deadline && entryForm.target_mode === 'date'"
+              ><label
+                ><span>Target date and time</span
+                ><input
+                  type="datetime-local"
+                  x-model="entryForm.target_at" /><small
+                  class="field-error"
+                  x-show="entryErrors.target_at"
+                  x-text="entryErrors.target_at"
+                ></small></label
+            ></template>
+            <template
+              x-if="entryForm.has_deadline && entryForm.target_mode === 'duration'"
+            >
+              <div class="duration-fields">
+                <label
+                  ><span>Duration</span
+                  ><input
+                    type="number"
+                    :min="['months', 'years'].includes(entryForm.target_unit) ? 1 : 0.01"
+                    max="1000000"
+                    :step="['months', 'years'].includes(entryForm.target_unit) ? 1 : 'any'"
+                    x-model="entryForm.target_value" /><small
+                    class="field-error"
+                    x-show="entryErrors.target_value"
+                    x-text="entryErrors.target_value"
+                  ></small></label
+                ><label
+                  ><span>Unit</span
+                  ><select x-model="entryForm.target_unit">
+                    <option value="hours">Hours</option>
+                    <option value="days">Days</option>
+                    <option value="weeks">Weeks</option>
+                    <option value="four_weeks">Months (4 weeks)</option>
+                    <option value="months">Calendar months</option>
+                    <option value="years">Calendar years</option></select
+                  ><small
+                    class="field-error"
+                    x-show="entryErrors.target_unit"
+                    x-text="entryErrors.target_unit"
+                  ></small
+                ></label>
+              </div>
+            </template>
+            <small
               class="field-error"
-              x-show="entryErrors.target_at"
-              x-text="entryErrors.target_at"
-            ></small></label
-        ></template>
-        <template
-          x-if="entryForm.kind === 'milestone' && entryForm.target_mode === 'duration'"
-        >
-          <div class="duration-fields">
-            <label
-              ><span>Duration</span
-              ><input
-                type="number"
-                :min="['months', 'years'].includes(entryForm.target_unit) ? 1 : 0.01"
-                max="1000000"
-                :step="['months', 'years'].includes(entryForm.target_unit) ? 1 : 'any'"
-                required
-                x-model="entryForm.target_value" /><small
-                class="field-error"
-                x-show="entryErrors.target_value"
-                x-text="entryErrors.target_value"
-              ></small></label
-            ><label
-              ><span>Unit</span
-              ><select x-model="entryForm.target_unit">
-                <option value="hours">Hours</option>
-                <option value="days">Days</option>
-                <option value="weeks">Weeks</option>
-                <option value="four_weeks">Months (4 weeks)</option>
-                <option value="months">Calendar months</option>
-                <option value="years">Calendar years</option></select
-              ><small
-                class="field-error"
-                x-show="entryErrors.target_unit"
-                x-text="entryErrors.target_unit"
-              ></small
-            ></label>
+              x-show="entryErrors.task"
+              x-text="entryErrors.task"
+            ></small>
           </div>
         </template>
         <div class="dialog-actions">

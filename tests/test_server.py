@@ -129,3 +129,36 @@ class ServerTestCase(unittest.TestCase):
         self.assertEqual(status, 413)
         status, _, _ = self.request("/api/trackers", "PATCH", {})
         self.assertEqual(status, 405)
+
+    def test_task_milestone_checkin_workflow(self):
+        status, _, body = self.request("/api/trackers", "POST", {
+            "title": "Habits", "description": "", "started_at": "2024-01-01T00:00:00Z"})
+        tracker = json.loads(body)
+        status, _, body = self.request(f"/api/trackers/{tracker['id']}/entries", "POST", {
+            "kind": "milestone", "title": "Morning", "body": "", "target_mode": "none",
+            "task": {"per_period": 1, "period_unit": "day",
+                     "items": [{"label": "Push-ups", "checked": True}, {"label": "Read", "checked": False}]}})
+        self.assertEqual(status, 201)
+        entry = json.loads(body)
+
+        status, _, body = self.request(f"/api/entries/{entry['id']}/checkins", "POST")
+        self.assertEqual(status, 201)
+        checkin = json.loads(body)
+        self.assertTrue(checkin["changed"])
+        self.assertEqual(checkin["checked_count"], 1)
+        self.assertEqual(checkin["total_count"], 2)
+
+        status, _, body = self.request("/api/trackers")
+        loaded = json.loads(body)[0]["entries"][0]
+        self.assertEqual(loaded["task"]["per_period"], 1)
+        self.assertEqual(len(loaded["task"]["checkins"]), 1)
+
+        status, _, body = self.request("/api/entries/999/checkins", "POST")
+        self.assertEqual(status, 404)
+        self.assertEqual(json.loads(body)["error"]["message"], "That resource does not exist.")
+
+        status, _, body = self.request(f"/api/entries/{entry['id']}", "PUT", {
+            "kind": "milestone", "title": "Morning", "body": "",
+            "target_mode": "duration", "target_value": 1, "target_unit": "years"})
+        self.assertEqual(status, 200)
+        self.assertIsNone(json.loads(body)["task"])

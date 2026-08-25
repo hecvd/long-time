@@ -10,7 +10,12 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import unquote, urlsplit
 
-from domain import ValidationError, validate_entry, validate_import, validate_tracker  # pyright: ignore[reportMissingImports]
+from domain import (  # pyright: ignore[reportMissingImports]
+    ValidationError,
+    validate_entry,
+    validate_import,
+    validate_tracker,
+)
 from storage import Storage  # pyright: ignore[reportMissingImports]
 
 MAX_BODY = 65_536
@@ -18,6 +23,7 @@ MAX_IMPORT_BODY = 8_388_608
 TRACKER_PATH = re.compile(r"^/api/trackers/(\d+)$")
 TRACKER_ENTRIES_PATH = re.compile(r"^/api/trackers/(\d+)/entries$")
 ENTRY_PATH = re.compile(r"^/api/entries/(\d+)$")
+CHECKIN_PATH = re.compile(r"^/api/entries/(\d+)/checkins$")
 
 
 class ApiError(Exception):
@@ -128,6 +134,13 @@ def create_handler(storage: Storage, static_dir: Path):
                     if record is None:
                         raise ApiError(404, "not_found", "That tracker does not exist.")
                     self.send_json(201, record)
+                    return
+                checkin_match = CHECKIN_PATH.fullmatch(path)
+                if checkin_match and method == "POST":
+                    checkin = storage.create_checkin(int(checkin_match.group(1)))
+                    if checkin is None:
+                        raise ApiError(404, "not_found", "That resource does not exist.")
+                    self.send_json(201, checkin)
                     return
                 entry_match = ENTRY_PATH.fullmatch(path)
                 if entry_match and method in {"PUT", "DELETE"}:
