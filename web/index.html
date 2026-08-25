@@ -187,7 +187,7 @@
                   </button>
                 </div>
               </div>
-              <section class="tracker-section">
+              <section class="tracker-section" x-show="taskEntries(tracker).length">
                 <div class="entry-heading">
                   <div>
                     <p class="eyebrow">Checklists</p>
@@ -203,7 +203,7 @@
                     </button>
                   </div>
                 </div>
-                <div class="task-list" x-show="taskEntries(tracker).length">
+                <div class="task-list">
                   <template
                     x-for="entry in taskEntries(tracker)"
                     :key="'task-' + entry.id"
@@ -282,9 +282,6 @@
                 </div>
               </template>
                 </div>
-                <p class="empty-section" x-show="!taskEntries(tracker).length">
-                  Nothing to check in yet.
-                </p>
               </section>
               <section class="tracker-section">
                 <div class="entry-heading">
@@ -293,6 +290,14 @@
                     <h3>Timeline</h3>
                   </div>
                   <div class="inline-actions">
+                    <button
+                      class="primary-button small"
+                      type="button"
+                      x-show="!taskEntries(tracker).length"
+                      @click="openNewMilestone(tracker)"
+                    >
+                      Add milestone
+                    </button>
                     <button type="button" @click="openNewNote(tracker)">
                       Add note
                     </button>

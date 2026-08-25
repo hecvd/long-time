@@ -177,7 +177,7 @@ test("cached trackers round-trip and degrade to empty", () => {
 
 test("offline shell and data cache are wired", () => {
 	const sw = fs.readFileSync(path.join(__dirname, "..", "web", "sw.js"), "utf8");
-	assert.match(sw, /const CACHE = "long-time-shell-v3"/);
+	assert.match(sw, /const CACHE = "long-time-shell-v4"/);
 	assert.match(sw, /"\/app\.js"/);
 	assert.match(sw, /startsWith\("\/api\/"\)/);
 
@@ -403,8 +403,10 @@ test("check-in card and checklist editor are wired", () => {
 	assert.match(html, /<h3>Tasks<\/h3>/);
 	assert.match(html, /<h3>Timeline<\/h3>/);
 	assert.match(html, /<h3>Tasks<\/h3>[\s\S]*<h3>Timeline<\/h3>/);
-	assert.match(html, /empty-section" x-show="!taskEntries\(tracker\)\.length"/);
+	assert.match(html, /tracker-section" x-show="taskEntries\(tracker\)\.length"/);
+	assert.doesNotMatch(html, /Nothing to check in yet/);
 	assert.match(html, /empty-section" x-show="!railEntries\(tracker\)\.length"/);
+	assert.match(html, /x-show="!taskEntries\(tracker\)\.length"[\s\S]*openNewMilestone/);
 	assert.match(html, /entryErrors\['task\.per_period'\]/);
 	assert.match(html, /class="measurements task-measurements"/);
 	assert.match(html, /trackerTaskStats\(tracker\)/);
