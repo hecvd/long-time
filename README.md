@@ -136,11 +136,18 @@ database. A pre-wired stack is in
 
 ## Run without Docker
 
+Requires Python 3.11+ and no third-party runtime dependencies. [uv](https://docs.astral.sh/uv/) is the supported way to install the dev toolchain (pytest, ruff) and run commands.
+
+```bash
+uv sync
+uv run python src/server.py --host 127.0.0.1 --port 5225 --database data/long-time.db
+```
+
+Or, with any 3.11+ interpreter and no venv:
+
 ```bash
 python src/server.py --host 127.0.0.1 --port 5225 --database data/long-time.db
 ```
-
-Requires Python 3.11+ and no third-party dependencies.
 
 ## Layout
 
@@ -150,9 +157,14 @@ web/     frontend: static HTML, CSS, JS served at the web root
 tests/   Python and Node tests
 ```
 
-## Tests
+## Tests and lint
 
 ```bash
-uvx pytest          # Python API, storage, and domain tests
-node --test tests   # frontend logic tests
+uv run pytest                    # Python API, storage, and domain tests
+uv run ruff check src tests      # Python lint
+uv run ruff format src tests     # Python format (opt-in; not required in CI)
+npm ci                           # JS toolchain (Biome)
+npm run lint                     # JS lint and format check
+npm run format                   # JS lint/format write
+npm test                         # frontend logic tests
 ```
