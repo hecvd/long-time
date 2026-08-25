@@ -294,15 +294,14 @@ class Storage:
                 changed = set(checked_ids) != previous or total != last_changed["total_count"]
             cursor = db.execute(
                 "INSERT INTO task_checkins(entry_id, occurred_at, checked_count, total_count, changed, checked_item_ids) VALUES (?, ?, ?, ?, ?, ?)",
-                (entry_id, occurred_at, len(checked_ids), total, 1 if changed else 0,
-                 json.dumps(checked_ids) if changed else None),
+                (entry_id, occurred_at, len(checked_ids), total, 1 if changed else 0, json.dumps(checked_ids)),
             )
             db.execute("UPDATE trackers SET updated_at=? WHERE id=?", (now, entry["tracker_id"]))
             checkin_id = cursor.lastrowid
         return {
             "id": checkin_id, "entry_id": entry_id, "occurred_at": occurred_at,
             "checked_count": len(checked_ids), "total_count": total,
-            "changed": changed, "checked_item_ids": checked_ids if changed else None,
+            "changed": changed, "checked_item_ids": checked_ids,
         }
 
     def delete_entry(self, entry_id):

@@ -177,7 +177,7 @@ test("cached trackers round-trip and degrade to empty", () => {
 
 test("offline shell and data cache are wired", () => {
 	const sw = fs.readFileSync(path.join(__dirname, "..", "web", "sw.js"), "utf8");
-	assert.match(sw, /const CACHE = "long-time-shell-v4"/);
+	assert.match(sw, /const CACHE = "long-time-shell-v5"/);
 	assert.match(sw, /"\/app\.js"/);
 	assert.match(sw, /startsWith\("\/api\/"\)/);
 
@@ -396,9 +396,13 @@ test("check-in card and checklist editor are wired", () => {
 	assert.match(html, /@change="toggleTaskItem\(entry, item\)"/);
 	assert.match(html, /@click="checkIn\(entry\)"/);
 	assert.match(html, /x-text="taskStatsLabel\(entry\)"/);
+	assert.match(html, /x-model="entryForm\.has_task"/);
+	assert.match(html, /x-if="entryForm\.has_task"/);
 	assert.match(html, /@click="addTaskItem\(\)"/);
 	assert.match(html, /x-model="entryForm\.period_unit"/);
 	assert.match(html, /x-model="entryForm\.has_deadline"/);
+	assert.match(html, /x-show="entry\.task\.checkins\.length"/);
+	assert.match(html, /x-for="checkin in checkinHistory\(entry\)"/);
 	assert.match(html, /:key="item\.key"/);
 	assert.match(html, /<h3>Tasks<\/h3>/);
 	assert.match(html, /<h3>Timeline<\/h3>/);
@@ -419,4 +423,9 @@ test("check-in card and checklist editor are wired", () => {
 	assert.match(app, /railEntries\(tracker\)/);
 	assert.match(app, /taskEntries\(tracker\)/);
 	assert.match(app, /payload\.task = null/);
+	assert.match(app, /has_task: false/);
+	assert.match(app, /has_task: Boolean\(entry\.task\)/);
+	assert.doesNotMatch(app, /kind === "milestone" \? \[newTaskItem\(\)\]/);
+	assert.match(app, /checkinHistory\(entry\)/);
+	assert.doesNotMatch(app, /changedCheckins\(entry\)/);
 });

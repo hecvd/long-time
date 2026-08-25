@@ -160,12 +160,12 @@ class StorageTestCase(unittest.TestCase):
         self.assertEqual(checkin["checked_count"], 1)
         self.assertEqual(checkin["total_count"], 2)
 
-    def test_unchanged_checkin_stores_no_ids_but_advances_total(self):
-        entry, _ = self._make_task([("A", True)])
+    def test_unchanged_checkin_still_stores_ids(self):
+        entry, ids = self._make_task([("A", True)])
         self.storage.create_checkin(entry["id"])
         second = self.storage.create_checkin(entry["id"])
         self.assertFalse(second["changed"])
-        self.assertIsNone(second["checked_item_ids"])
+        self.assertEqual(second["checked_item_ids"], [ids["A"]])
         task = self.storage.list_trackers()[0]["entries"][0]["task"]
         self.assertEqual(len(task["checkins"]), 2)
         self.assertEqual(sum(1 for c in task["checkins"] if c["changed"]), 1)
@@ -301,4 +301,4 @@ class StorageTestCase(unittest.TestCase):
         self.assertEqual(changed[0]["checked_item_ids"], [])
         self.assertTrue(set(changed[-1]["checked_item_ids"]).issubset(active_ids))
         self.assertEqual(len(changed[-1]["checked_item_ids"]), 1)
-        self.assertIsNone(unchanged[0]["checked_item_ids"])
+        self.assertEqual(unchanged[0]["checked_item_ids"], changed[-1]["checked_item_ids"])

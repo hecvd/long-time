@@ -1,5 +1,5 @@
 // App-shell cache for read-only offline use. Bump CACHE to force a shell refresh.
-const CACHE = "long-time-shell-v4";
+const CACHE = "long-time-shell-v5";
 const SHELL = ["/", "/app.css", "/logic.js", "/app.js", "/vendor/alpine-3.14.9.min.js"];
 
 self.addEventListener("install", (event) => {
