@@ -1,0 +1,13 @@
+{
+	"name": "long-time",
+	"private": true,
+	"description": "A minimal self-hosted time tracker",
+	"scripts": {
+		"test": "node --test tests/test_logic.js",
+		"lint": "biome check",
+		"format": "biome check --write"
+	},
+	"devDependencies": {
+		"@biomejs/biome": "^2.5.10"
+	}
+}

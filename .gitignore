@@ -12,3 +12,4 @@ letsencrypt/
 config/
 
 docs/
+node_modules/
